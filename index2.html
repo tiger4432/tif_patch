@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wafer Grid Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin:0; font-family:sans-serif; display:flex; height:100vh; }
+      #left { width:280px; padding:10px; background:#eee; color:#111; overflow-y:auto; }
+      #center { flex:1; display:flex; justify-content:center; align-items:center; background:#222; }
+      #right { width:360px; overflow-y:auto; background:#111; color:#fff; padding:10px; }
+      canvas { max-width:100%; height:auto; cursor:grab; }
+      canvas.dragging { cursor:grabbing; }
+      textarea { width:100%; height:80px; }
+
+      /* patches view */
+      .coord-card { border:1px solid #444; border-radius:8px; padding:8px; margin-bottom:12px; background:#1d1d1d; }
+      .coord-title { margin:0 0 6px; font-size:14px; color:#fff; }
+      .layers-wrap { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:10px; }
+      .layer-item { text-align:center; background:#2a2a2a; padding:6px; border-radius:6px; }
+      .layer-label { font-size:11px; color:#bbb; margin-bottom:4px; }
+      .layer-item canvas { max-width:100%; border:1px solid #555; border-radius:4px; }
+
+      /* buttons */
+      button { cursor:pointer; }
+      .mode-on { background:#28a745 !important; color:#fff !important; font-weight:bold; }
+
+      /* minor */
+      .refMode { background:#ff8; color:#111; }
+      #patchNav { display:flex; align-items:center; gap:8px; }
+      #voidControls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+      #voidControls select { height:30px; }
+    </style>
+  </head>
+  <body>
+    <div id="left">
+      <h3>Load Data</h3>
+      <label>Multi-page TIFF <input id="tiffFile" type="file" accept=".tif,.tiff"></label><br><br>
+
+      <label>Chip CSV (파일 또는 엑셀복붙)</label>
+      <input id="csvFile" type="file" accept=".csv"><br>
+      <textarea id="csvPaste" placeholder="엑셀에서 복사 후 붙여넣기 (x,y,type) 혹은 Bonding Map"></textarea><br>
+
+      <label>Page: <select id="pageSelect"></select></label><br><br>
+
+      <h3>Grid</h3>
+      Cols <input id="cols" type="number" value="8"><br>
+      Rows <input id="rows" type="number" value="8"><br>
+      Cell W <input id="cellW" type="number" value="100"><br>
+      Cell H <input id="cellH" type="number" value="100"><br><br>
+
+      <h3>Reference</h3>
+      기준 X <input id="refX" type="number" value="0"><br>
+      기준 Y <input id="refY" type="number" value="0"><br>
+      <button id="setRefBtn">Set Reference</button><br><br>
+
+      <h3>Enhance</h3>
+      Contrast α <input id="alpha" type="number" step="0.1" value="1.2"><br>
+      Brightness β <input id="beta" type="number" value="10"><br><br>
+
+      <h3>Enhance Target</h3>
+      Target Mean <input id="targetMean" type="number" step="0.01" value="0.5"><br>
+      Target Std  <input id="targetStd"  type="number" step="0.01" value="0.2"><br>
+      Padding(px) <input id="padPx"      type="number" value="10"><br><br>
+
+      <button id="extractBtn">Extract Patches</button>
+      <button id="downloadZipBtn">Download All Patches (ZIP)</button>
+    </div>
+
+    <div id="center">
+      <canvas id="wafer"></canvas>
+    </div>
+
+    <div id="right">
+      <h3>Patches</h3>
+      <div id="voidControls">
+        <button id="toggleVoidMode">Mark Void</button>
+        <button id="toggleDeleteMode">Delete Void</button>
+        <select id="voidTypeSelect">
+          <option value="void">void</option>
+          <option value="crack">crack</option>
+          <option value="particle">particle</option>
+        </select>
+        <button id="downloadVoids">Download Voids JSON</button>
+      </div>
+
+      <div id="patchNav" style="margin-bottom:10px;">
+        <button id="prevPage">◀ Prev</button>
+        <span id="pageInfo"></span>
+        <button id="nextPage">Next ▶</button>
+      </div>
+      <div id="patches"></div>
+    </div>
+
+    <script type="module">
+      import UTIF from "https://cdn.skypack.dev/utif";
+
+      /* =========================
+         DOM refs & global state
+      ==========================*/
+      const waferCanvas = document.getElementById("wafer");
+      const waferCtx    = waferCanvas.getContext("2d");
+      const pageSelect  = document.getElementById("pageSelect");
+
+      const tiffInput = document.getElementById("tiffFile");
+      const csvInput  = document.getElementById("csvFile");
+      const csvPaste  = document.getElementById("csvPaste");
+
+      const colsInput  = document.getElementById("cols");
+      const rowsInput  = document.getElementById("rows");
+      const cellWInput = document.getElementById("cellW");
+      const cellHInput = document.getElementById("cellH");
+
+      const alphaInput = document.getElementById("alpha");
+      const betaInput  = document.getElementById("beta");
+
+      const targetMeanInput = document.getElementById("targetMean");
+      const targetStdInput  = document.getElementById("targetStd");
+      const padPxInput      = document.getElementById("padPx");
+
+      const extractBtn = document.getElementById("extractBtn");
+      const downloadZipBtn = document.getElementById("downloadZipBtn");
+      const patchesDiv = document.getElementById("patches");
+
+      const refXInput  = document.getElementById("refX");
+      const refYInput  = document.getElementById("refY");
+      const setRefBtn  = document.getElementById("setRefBtn");
+
+      const markBtn   = document.getElementById("toggleVoidMode");
+      const deleteBtn = document.getElementById("toggleDeleteMode");
+      const typeSelect = document.getElementById("voidTypeSelect");
+
+      let pages = [];             // original page canvases (full res)
+      let pageIndex = 0;
+      let currentScale = 1;       // display scale
+      let origin = { x:50, y:50 };// in display pixels
+      let refMode = false;
+      let refGrid = { x:0, y:0 }; // reference grid index
+      let csvRows = [];           // [{x,y,type}]
+      let chipPoints = [];        // for blue dots
+      let allPatchPages = [];     // pagination [{coord, layers:[{canvas,label,type,layer,imageDataBase}]}]
+      let currentPatchPage = 0;
+
+      // void marking
+      let voidMarkMode = false;
+      let deleteVoidMode = false;
+      let voidRecords = []; // [{patchLabel,type,centerX,centerY,radiusX,radiusY}]
+
+      const voidColors = {
+        void: "cyan",
+        crack: "magenta",
+        particle: "lime",
+        default: "yellow",
+      };
+      const voidKeyMap = { "1":"void", "2":"crack", "3":"particle",
+                           "Numpad1":"void", "Numpad2":"crack", "Numpad3":"particle" };
+
+      /* =========================
+         TIFF load & display
+      ==========================*/
+      async function loadTiff(file){
+        const buf  = await file.arrayBuffer();
+        const ifds = UTIF.decode(buf);
+        ifds.forEach(ifd => UTIF.decodeImage(buf, ifd));
+        pages = ifds.map(ifd => {
+          const rgba = UTIF.toRGBA8(ifd);
+          const c = document.createElement("canvas");
+          c.width = ifd.width; c.height = ifd.height;
+          c.getContext("2d").putImageData(
+            new ImageData(new Uint8ClampedArray(rgba), ifd.width, ifd.height),0,0
+          );
+          return c;
+        });
+
+        // page select
+        pageSelect.innerHTML = pages.map((_,i)=>`<option value="${i}">Page ${i+1}</option>`).join("");
+        pageIndex = 0;
+        drawPage();
+      }
+
+      function drawPage(){
+        const src = pages[pageIndex];
+        if(!src) return;
+
+        const MAX_SIZE = 2048; // safe display size
+        const scale = Math.min(1, MAX_SIZE / Math.max(src.width, src.height));
+        const drawW = Math.round(src.width  * scale);
+        const drawH = Math.round(src.height * scale);
+
+        waferCanvas.width  = drawW;
+        waferCanvas.height = drawH;
+        waferCtx.clearRect(0,0,drawW,drawH);
+        waferCtx.drawImage(src,0,0,drawW,drawH);
+
+        currentScale = scale;
+        drawGrid();
+      }
+
+      pageSelect.addEventListener("change", e=>{
+        pageIndex = parseInt(e.target.value,10) || 0;
+        drawPage();
+      });
+
+      /* =========================
+         Grid, CSV & Bonding map
+      ==========================*/
+      function drawGrid(){
+        if(!pages.length) return;
+        const cols  = +colsInput.value;
+        const rows  = +rowsInput.value;
+        const cellW = +cellWInput.value * currentScale;
+        const cellH = +cellHInput.value * currentScale;
+
+        waferCtx.strokeStyle = "lime";
+        for(let i=0;i<=cols;i++){
+          const x = origin.x + i*cellW;
+          waferCtx.beginPath(); waferCtx.moveTo(x, origin.y); waferCtx.lineTo(x, origin.y + rows*cellH); waferCtx.stroke();
+        }
+        for(let j=0;j<=rows;j++){
+          const y = origin.y + j*cellH;
+          waferCtx.beginPath(); waferCtx.moveTo(origin.x, y); waferCtx.lineTo(origin.x + cols*cellW, y); waferCtx.stroke();
+        }
+
+        // blue dots for CSV chips
+        waferCtx.fillStyle = "deepskyblue";
+        chipPoints.forEach(pt=>{
+          const px = origin.x + (pt.x + refGrid.x + 0.5) * cellW;
+          const py = origin.y + (pt.y + refGrid.y + 0.5) * cellH;
+          waferCtx.beginPath(); waferCtx.arc(px, py, Math.max(3, cellW*0.05), 0, 2*Math.PI); waferCtx.fill();
+        });
+
+        // red dot for reference
+        waferCtx.fillStyle = "red";
+        const refPixelX = origin.x + refGrid.x*cellW + cellW/2;
+        const refPixelY = origin.y + refGrid.y*cellH + cellH/2;
+        waferCtx.beginPath(); waferCtx.arc(refPixelX, refPixelY, 6, 0, 2*Math.PI); waferCtx.fill();
+      }
+
+      // robust CSV (x,y,type) parser
+      function parseCSVTable(text){
+        const lines = text.trim().split(/\r?\n/);
+        const header = lines[0].split(/[\t,]+/).map(h=>h.trim().toLowerCase());
+        const xi = header.indexOf("x"), yi = header.indexOf("y"), ti = header.indexOf("type");
+        if(xi===-1 || yi===-1) return null; // not a simple table
+        const out=[];
+        for(let i=1;i<lines.length;i++){
+          const l = lines[i].trim(); if(!l) continue;
+          const c = l.split(/[\t,]+/);
+          const x = parseFloat(c[xi]); const y = parseFloat(c[yi]);
+          if(Number.isNaN(x) || Number.isNaN(y)) continue;
+          out.push({ x, y, type: (ti>=0 && c[ti]) ? c[ti].trim() : "" });
+        }
+        return out;
+      }
+
+      // bonding map parser (tab-delimited; keeps trailing blanks)
+      function parseBondingMap(text){
+        const lines = text.trimEnd().split(/\r?\n/);
+        if(lines.length<2) return [];
+        const xHeaders = lines[0].split("\t").slice(1).map(h=>parseInt(h.trim(),10));
+
+        const out=[];
+        for(let r=1;r<lines.length;r++){
+          const cells = lines[r].split("\t");
+          if(cells.length<2) continue;
+          const y = parseInt((cells[0]||"").trim(),10); if(Number.isNaN(y)) continue;
+          for(let c=1;c<=xHeaders.length;c++){
+            const val = (cells[c]||"").trim();
+            if(!val) continue;
+            const x = xHeaders[c-1];
+            if(!Number.isNaN(x)) out.push({ x, y, type: val });
+          }
+        }
+        return out;
+      }
+
+      // auto detect & parse
+      function parseAnyToChipRows(text){
+        const table = parseCSVTable(text);
+        if(table) return table;
+        return parseBondingMap(text);
+      }
+
+      /* =========================
+         Enhance
+      ==========================*/
+      function adjust(ctx){
+        const img = ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);
+        const a = +alphaInput.value, b = +betaInput.value;
+        const d = img.data;
+        for(let i=0;i<d.length;i+=4){
+          d[i]   = Math.min(255, Math.max(0, d[i]*a + b));
+          d[i+1] = Math.min(255, Math.max(0, d[i+1]*a + b));
+          d[i+2] = Math.min(255, Math.max(0, d[i+2]*a + b));
+        }
+        ctx.putImageData(img,0,0);
+      }
+
+      function enhanceToTarget(ctx, targetMean=0.5, targetStd=0.2, pad=10){
+        const {width, height} = ctx.canvas;
+        const imgData = ctx.getImageData(0,0,width,height);
+        const d = imgData.data;
+
+        const roiPixels=[];
+        for(let y=pad;y<height-pad;y++){
+          for(let x=pad;x<width-pad;x++){
+            const idx=(y*width+x)*4;
+            roiPixels.push((d[idx]+d[idx+1]+d[idx+2])/(3*255));
+          }
+        }
+        const mean = roiPixels.reduce((a,b)=>a+b,0)/roiPixels.length;
+        const std  = Math.sqrt(roiPixels.reduce((a,b)=>a+(b-mean)*(b-mean),0)/roiPixels.length) || 1e-6;
+        const scale = targetStd/std;
+        const offset = targetMean - mean*scale;
+
+        for(let i=0;i<d.length;i+=4){
+          for(let c=0;c<3;c++){
+            let v = d[i+c]/255;
+            v = v*scale + offset;
+            v = v<0?0:(v>1?1:v);
+            d[i+c] = v*255;
+          }
+        }
+        ctx.putImageData(imgData,0,0);
+      }
+
+      /* =========================
+         Void draw helpers
+      ==========================*/
+      function attachVoidEvents(canvas, patchLabel, baseImageData){
+        const ctx = canvas.getContext("2d");
+
+        // draw existing annotations on top of base
+        function repaint(){
+          ctx.putImageData(baseImageData,0,0);
+          drawAllVoids(ctx, patchLabel);
+        }
+
+        canvas.addEventListener("mousedown", e=>{
+          if(!voidMarkMode) return;
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width  / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const sx = (e.clientX - rect.left)*scaleX;
+          const sy = (e.clientY - rect.top )*scaleY;
+
+          const drag = me=>{
+            const cx = (me.clientX - rect.left)*scaleX;
+            const cy = (me.clientY - rect.top )*scaleY;
+            repaint();
+            const selType = typeSelect.value || "default";
+            ctx.strokeStyle = voidColors[selType] || voidColors.default;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse((sx+cx)/2, (sy+cy)/2, Math.abs(cx-sx)/2, Math.abs(cy-sy)/2, 0, 0, 2*Math.PI);
+            ctx.stroke();
+          };
+          const up = ue=>{
+            document.removeEventListener("mousemove", drag);
+            document.removeEventListener("mouseup", up);
+            const ex = (ue.clientX - rect.left)*scaleX;
+            const ey = (ue.clientY - rect.top )*scaleY;
+            const centerX = (sx+ex)/2, centerY=(sy+ey)/2;
+            const radiusX = Math.abs(ex-sx)/2, radiusY=Math.abs(ey-sy)/2;
+            const type = typeSelect.value || "void";
+            voidRecords.push({ patchLabel, type, centerX, centerY, radiusX, radiusY });
+            repaint();
+          };
+          document.addEventListener("mousemove", drag);
+          document.addEventListener("mouseup", up);
+        });
+
+        canvas.addEventListener("click", e=>{
+          if(!deleteVoidMode) return;
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width  / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (e.clientX - rect.left)*scaleX;
+          const y = (e.clientY - rect.top )*scaleY;
+
+          let removed=false;
+          voidRecords = voidRecords.filter(v=>{
+            if(v.patchLabel!==patchLabel) return true;
+            const dx=(x-v.centerX)/v.radiusX, dy=(y-v.centerY)/v.radiusY;
+            const inside = dx*dx + dy*dy <= 1;
+            if(inside && !removed){ removed=true; return false; }
+            return true;
+          });
+          if(removed){
+            ctx.putImageData(baseImageData,0,0);
+            drawAllVoids(ctx, patchLabel);
+          }
+        });
+      }
+
+      function drawAllVoids(ctx, patchLabel){
+        ctx.lineWidth = 2;
+        voidRecords.filter(v=>v.patchLabel===patchLabel).forEach(v=>{
+          ctx.beginPath();
+          ctx.strokeStyle = voidColors[v.type] || voidColors.default;
+          ctx.ellipse(v.centerX, v.centerY, v.radiusX, v.radiusY, 0, 0, 2*Math.PI);
+          ctx.stroke();
+        });
+      }
+
+      /* =========================
+         Events
+      ==========================*/
+      tiffInput.onchange = e => { if(e.target.files[0]) loadTiff(e.target.files[0]); };
+
+      // grid live update
+      [colsInput, rowsInput, cellWInput, cellHInput].forEach(el=>{
+        el.addEventListener("input", ()=> d

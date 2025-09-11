@@ -125,6 +125,20 @@
         color: white;
         font-weight: bold;
       }
+
+      #topControls {
+        position: sticky;
+        top: 0; /* 화면 최상단 고정 */
+        z-index: 1000; /* 다른 요소 위에 표시 */
+        background: #222; /* 배경색, 스크롤 시 내용이 비치지 않게 */
+        padding: 10px;
+      }
+
+      #voidControls {
+        padding: 10px;
+        display: flex;
+        gap: 8px;
+      }
     </style>
   </head>
   <body>
@@ -180,20 +194,22 @@
 
     <div id="right">
       <h3>Patches</h3>
-      <div id="voidControls">
-        <button id="toggleVoidMode">Mark Void</button>
-        <button id="toggleDeleteMode">Delete Void</button>
-        <select id="voidTypeSelect">
-          <option value="void">void</option>
-          <option value="crack">crack</option>
-          <option value="particle">particle</option>
-        </select>
-        <button id="downloadVoids">Download Voids JSON</button>
-      </div>
-      <div id="patchNav" style="margin-bottom: 10px">
-        <button id="prevPage">◀ Prev</button>
-        <span id="pageInfo"></span>
-        <button id="nextPage">Next ▶</button>
+      <div id="topControls">
+        <div id="voidControls">
+          <button id="toggleVoidMode">Mark Void</button>
+          <button id="toggleDeleteMode">Delete Void</button>
+          <select id="voidTypeSelect">
+            <option value="void">void</option>
+            <option value="crack">crack</option>
+            <option value="particle">particle</option>
+          </select>
+          <button id="downloadVoids">Download Voids JSON</button>
+        </div>
+        <div id="patchNav" style="margin-bottom: 10px; text-align: center">
+          <button id="prevPage">◀ Prev</button>
+          <span id="pageInfo"></span>
+          <button id="nextPage">Next ▶</button>
+        </div>
       </div>
       <div id="patches"></div>
     </div>
@@ -216,6 +232,8 @@
       let voidMarkMode = false;
       let voidRecords = []; // [{patchLabel, type, centerX, centerY, radiusX, radiusY}]
       let deleteVoidMode = false;
+      let selectedVoid = null;
+      let resizeMode = false;
 
       const markBtn = document.getElementById("toggleVoidMode");
       const deleteBtn = document.getElementById("toggleDeleteMode");
@@ -223,13 +241,11 @@
       document.getElementById("toggleVoidMode").onclick = () => {
         voidMarkMode = !voidMarkMode;
         markBtn.classList.toggle("mode-on", voidMarkMode); // ON이면 초록색
-        alert(voidMarkMode ? "Void marking ON" : "Void marking OFF");
       };
 
       document.getElementById("toggleDeleteMode").onclick = () => {
         deleteVoidMode = !deleteVoidMode;
         deleteBtn.classList.toggle("mode-on", deleteVoidMode);
-        alert(deleteVoidMode ? "Delete mode ON" : "Delete mode OFF");
       };
       // === UI 엘리먼트 ===
       const tiffInput = document.getElementById("tiffFile");
@@ -550,6 +566,87 @@
             drawAllVoids(ctx, patchLabel); // 남은 보이드 다시 그리기
           }
         });
+
+        canvas.addEventListener("mousedown", (e) => {
+          if (voidMarkMode || deleteVoidMode) return;
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (e.clientX - rect.left) * scaleX;
+          const y = (e.clientY - rect.top) * scaleY;
+
+          selectedVoid = voidRecords.find(
+            (v) =>
+              v.patchLabel === patchLabel &&
+              (() => {
+                const dx = x - v.centerX;
+                const dy = y - v.centerY;
+                const angle = Math.atan2(dy, dx);
+                const rB =
+                  (v.radiusX * v.radiusY) /
+                  Math.sqrt(
+                    (v.radiusY * Math.cos(angle)) ** 2 +
+                      (v.radiusX * Math.sin(angle)) ** 2
+                  );
+                const dist = Math.hypot(dx, dy);
+                return dist <= rB + 8; // 8px 오차 허용
+              })()
+          );
+
+          if (!selectedVoid) return;
+
+          // 이동/리사이즈 구분
+          const dx = x - selectedVoid.centerX;
+          const dy = y - selectedVoid.centerY;
+          const angle = Math.atan2(dy, dx);
+          const rB =
+            (selectedVoid.radiusX * selectedVoid.radiusY) /
+            Math.sqrt(
+              (selectedVoid.radiusY * Math.cos(angle)) ** 2 +
+                (selectedVoid.radiusX * Math.sin(angle)) ** 2
+            );
+          const dist = Math.hypot(dx, dy);
+          const tol = 8;
+
+          resizeMode = Math.abs(dist - rB) <= tol;
+
+          const offsetX = x - selectedVoid.centerX;
+          const offsetY = y - selectedVoid.centerY;
+
+          const moveHandler = (me) => {
+            const mx = (me.clientX - rect.left) * scaleX;
+            const my = (me.clientY - rect.top) * scaleY;
+
+            if (resizeMode) {
+              // Shift 누르면 비율 유지
+              const dx = Math.abs(mx - selectedVoid.centerX);
+              const dy = Math.abs(my - selectedVoid.centerY);
+              if (me.shiftKey) {
+                const r = Math.max(dx, dy);
+                selectedVoid.radiusX = selectedVoid.radiusY = r;
+              } else {
+                selectedVoid.radiusX = dx;
+                selectedVoid.radiusY = dy;
+              }
+            } else {
+              // 이동
+              selectedVoid.centerX = mx - offsetX;
+              selectedVoid.centerY = my - offsetY;
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            drawAllVoids(ctx, patchLabel);
+          };
+
+          const upHandler = () => {
+            document.removeEventListener("mousemove", moveHandler);
+            document.removeEventListener("mouseup", upHandler);
+            selectedVoid = null;
+          };
+
+          document.addEventListener("mousemove", moveHandler);
+          document.addEventListener("mouseup", upHandler);
+        });
       }
 
       // 특정 패치에 저장된 모든 보이드 다시 그리기
@@ -746,6 +843,30 @@
         currentPatchPage = 0;
         showPatchPage(0);
       };
+
+      document.getElementById("downloadZipBtn").onclick = () => {
+        if (!window.allPatchCanvases || !window.allPatchCanvases.length) {
+          alert("먼저 Extract Patches를 실행하세요.");
+          return;
+        }
+
+        const zip = new JSZip();
+
+        window.allPatchCanvases.forEach((p) => {
+          const folderPath = `split/${p.type}/layer_${String(p.layer).padStart(
+            2,
+            "0"
+          )}`;
+          const folder = zip.folder(folderPath);
+          const dataURL = p.canvas.toDataURL("image/png").split(",")[1]; // base64
+          folder.file(`${p.label}.png`, dataURL, { base64: true });
+        });
+
+        zip.generateAsync({ type: "blob" }).then((content) => {
+          saveAs(content, "wafer_patches_by_type.zip");
+        });
+      };
+
       // 페이지 표시 함수
       function showPatchPage(idx) {
         if (!allPatchPages.length) return;
