@@ -735,18 +735,23 @@
       // 그리드 클릭 → 참조 설정
       waferCanvas.addEventListener("click", (e) => {
         if (!refMode) return;
+
         const rect = waferCanvas.getBoundingClientRect();
-        const clickX =
-          ((e.clientX - rect.left) * waferCanvas.width) / rect.width;
-        const clickY =
-          ((e.clientY - rect.top) * waferCanvas.height) / rect.height;
-        const cellW = +cellWInput.value;
-        const cellH = +cellHInput.value;
-        const gx = Math.floor((clickX - origin.x / currentScale) / cellW);
-        const gy = Math.floor((clickY - origin.y / currentScale) / cellH);
+        const scaleX = waferCanvas.width / rect.width;
+        const scaleY = waferCanvas.height / rect.height;
+
+        const clickX = (e.clientX - rect.left) * scaleX;
+        const clickY = (e.clientY - rect.top) * scaleY;
+
+        console.log(clickX, clickY, cellW, cellH);
+        const gx = Math.floor(
+          ((clickX - origin.x) / cellW.value) * currentScale
+        );
+        const gy = Math.floor(
+          ((clickY - origin.y) / cellH.value) * currentScale
+        );
+        console.log(gx, gy);
         refGrid = { x: gx, y: gy };
-        refXInput.value = gx;
-        refYInput.value = gy;
         refMode = false;
         setRefBtn.classList.remove("refMode");
         setRefBtn.textContent = "Set Reference";
