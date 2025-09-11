@@ -119,6 +119,12 @@
         border: 1px solid #555;
         border-radius: 3px;
       }
+
+      .mode-on {
+        background-color: #28a745; /* 초록색 */
+        color: white;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
@@ -157,6 +163,13 @@
       Contrast α <input id="alpha" type="number" step="0.1" value="1.2" /><br />
       Brightness β <input id="beta" type="number" value="10" /><br /><br />
 
+      <h3>Enhance Target</h3>
+      Target Mean
+      <input id="targetMean" type="number" step="0.01" value="0.5" /><br />
+      Target Std
+      <input id="targetStd" type="number" step="0.01" value="0.2" /><br />
+      Padding(px) <input id="padPx" type="number" value="10" /><br /><br />
+
       <button id="extractBtn">Extract Patches</button>
       <button id="downloadZipBtn">Download All Patches (ZIP)</button>
     </div>
@@ -167,6 +180,21 @@
 
     <div id="right">
       <h3>Patches</h3>
+      <div id="voidControls">
+        <button id="toggleVoidMode">Mark Void</button>
+        <button id="toggleDeleteMode">Delete Void</button>
+        <select id="voidTypeSelect">
+          <option value="void">void</option>
+          <option value="crack">crack</option>
+          <option value="particle">particle</option>
+        </select>
+        <button id="downloadVoids">Download Voids JSON</button>
+      </div>
+      <div id="patchNav" style="margin-bottom: 10px">
+        <button id="prevPage">◀ Prev</button>
+        <span id="pageInfo"></span>
+        <button id="nextPage">Next ▶</button>
+      </div>
       <div id="patches"></div>
     </div>
 
@@ -184,7 +212,25 @@
       let refGrid = { x: 0, y: 0 }; // 사용자가 지정한 기준 grid index
       let refMode = false;
       let currentScale = 1;
+      let chipPoints = []; // 🔵 파란점 좌표 저장
+      let voidMarkMode = false;
+      let voidRecords = []; // [{patchLabel, type, centerX, centerY, radiusX, radiusY}]
+      let deleteVoidMode = false;
 
+      const markBtn = document.getElementById("toggleVoidMode");
+      const deleteBtn = document.getElementById("toggleDeleteMode");
+
+      document.getElementById("toggleVoidMode").onclick = () => {
+        voidMarkMode = !voidMarkMode;
+        markBtn.classList.toggle("mode-on", voidMarkMode); // ON이면 초록색
+        alert(voidMarkMode ? "Void marking ON" : "Void marking OFF");
+      };
+
+      document.getElementById("toggleDeleteMode").onclick = () => {
+        deleteVoidMode = !deleteVoidMode;
+        deleteBtn.classList.toggle("mode-on", deleteVoidMode);
+        alert(deleteVoidMode ? "Delete mode ON" : "Delete mode OFF");
+      };
       // === UI 엘리먼트 ===
       const tiffInput = document.getElementById("tiffFile");
       const csvInput = document.getElementById("csvFile");
@@ -231,7 +277,7 @@
         const src = pages[pageIndex];
         if (!src) return; // 혹시라도 undefined일 경우 대비
 
-        const MAX_SIZE = 512; // 브라우저 안전 범위
+        const MAX_SIZE = 1024; // 브라우저 안전 범위
         const scale = Math.min(1, MAX_SIZE / Math.max(src.width, src.height));
         const drawW = Math.round(src.width * scale);
         const drawH = Math.round(src.height * scale);
@@ -250,13 +296,45 @@
         drawPage();
       });
 
+      function parseBondingMap(text) {
+        const lines = text.trimEnd().split(/\r?\n/);
+        if (lines.length < 2) return [];
+
+        // 첫 행: X 헤더 (빈 문자열도 유지)
+        const xHeaders = lines[0]
+          .split("\t")
+          .slice(1)
+          .map((h) => h.trim())
+          .map((h) => parseInt(h, 10));
+
+        const out = [];
+        for (let r = 1; r < lines.length; r++) {
+          // 행 전체를 탭 기준으로 그대로 split → 끝의 빈 칸도 유지
+          const cells = lines[r].split("\t");
+          if (cells.length < 2) continue;
+
+          const y = parseInt((cells[0] || "").trim(), 10);
+          if (isNaN(y)) continue;
+
+          // xHeaders 길이에 맞게 순회
+          for (let c = 1; c <= xHeaders.length; c++) {
+            const val = (cells[c] || "").trim();
+            if (!val) continue;
+            const x = xHeaders[c - 1];
+            if (!isNaN(x)) out.push({ x, y, type: val });
+          }
+        }
+        console.log(out);
+        return out;
+      }
+
       function drawGrid() {
         if (!pages.length) return;
-        const scale = currentScale || 1;
         const cols = +colsInput.value;
         const rows = +rowsInput.value;
-        const cellW = +cellWInput.value * scale;
-        const cellH = +cellHInput.value * scale;
+        const cellW = +cellWInput.value * currentScale;
+        const cellH = +cellHInput.value * currentScale;
+
         waferCtx.strokeStyle = "lime";
         for (let i = 0; i <= cols; i++) {
           const x = origin.x + i * cellW;
@@ -272,7 +350,18 @@
           waferCtx.lineTo(origin.x + cols * cellW, y);
           waferCtx.stroke();
         }
-        // 기준점 시각화
+
+        // 🔵 CSV 좌표 기준으로 파란 점 표시
+        waferCtx.fillStyle = "deepskyblue";
+        chipPoints.forEach((pt) => {
+          const px = origin.x + (pt.x + refGrid.x + 0.5) * cellW;
+          const py = origin.y + (pt.y + refGrid.y + 0.5) * cellH;
+          waferCtx.beginPath();
+          waferCtx.arc(px, py, Math.max(3, cellW * 0.05), 0, 2 * Math.PI);
+          waferCtx.fill();
+        });
+
+        // 🔴 기준점(Reference) 빨간 점
         waferCtx.fillStyle = "red";
         const refPixelX = origin.x + refGrid.x * cellW + cellW / 2;
         const refPixelY = origin.y + refGrid.y * cellH + cellH / 2;
@@ -318,23 +407,204 @@
         ctx.putImageData(img, 0, 0);
       }
 
+      function enhanceToTarget(
+        ctx,
+        targetMean = 0.5,
+        targetStd = 0.2,
+        pad = 10
+      ) {
+        const { width, height } = ctx.canvas;
+        const imgData = ctx.getImageData(0, 0, width, height);
+        const d = imgData.data;
+
+        // ROI : padding 안쪽
+        const roiPixels = [];
+        for (let y = pad; y < height - pad; y++) {
+          for (let x = pad; x < width - pad; x++) {
+            const idx = (y * width + x) * 4;
+            // grayscale = average RGB
+            const g = (d[idx] + d[idx + 1] + d[idx + 2]) / (3 * 255);
+            roiPixels.push(g);
+          }
+        }
+        const mean = roiPixels.reduce((a, b) => a + b, 0) / roiPixels.length;
+        const std =
+          Math.sqrt(
+            roiPixels.reduce((a, b) => a + (b - mean) ** 2, 0) /
+              roiPixels.length
+          ) || 1e-6;
+
+        // 보정: (v - mean)/std -> target
+        const scale = targetStd / std;
+        const offset = targetMean - mean * scale;
+
+        for (let i = 0; i < d.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            let v = d[i + c] / 255;
+            v = v * scale + offset;
+            v = Math.min(1, Math.max(0, v));
+            d[i + c] = v * 255;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      const voidColors = {
+        void: "cyan",
+        crack: "magenta",
+        particle: "lime",
+        default: "yellow", // 미지정 타입
+      };
+      function attachVoidEvents(canvas, patchLabel, imageData) {
+        const ctx = canvas.getContext("2d");
+
+        canvas.addEventListener("mousedown", (e) => {
+          if (!voidMarkMode) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+
+          const startX = (e.clientX - rect.left) * scaleX;
+          const startY = (e.clientY - rect.top) * scaleY;
+
+          const dragHandler = (me) => {
+            const curX = (me.clientX - rect.left) * scaleX;
+            const curY = (me.clientY - rect.top) * scaleY;
+            // 타입별 색상 맵
+
+            ctx.putImageData(imageData, 0, 0);
+            const selType =
+              document.getElementById("voidTypeSelect").value || "default";
+            ctx.strokeStyle = voidColors[selType] || voidColors.default;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(
+              (startX + curX) / 2,
+              (startY + curY) / 2,
+              Math.abs(curX - startX) / 2,
+              Math.abs(curY - startY) / 2,
+              0,
+              0,
+              2 * Math.PI
+            );
+            ctx.stroke();
+          };
+
+          const upHandler = (ue) => {
+            document.removeEventListener("mousemove", dragHandler);
+            document.removeEventListener("mouseup", upHandler);
+            const endX = (ue.clientX - rect.left) * scaleX;
+            const endY = (ue.clientY - rect.top) * scaleY;
+
+            const centerX = (startX + endX) / 2;
+            const centerY = (startY + endY) / 2;
+            const radiusX = Math.abs(endX - startX) / 2;
+            const radiusY = Math.abs(endY - startY) / 2;
+
+            const type =
+              document.getElementById("voidTypeSelect").value || "void";
+            voidRecords.push({
+              patchLabel,
+              type,
+              centerX,
+              centerY,
+              radiusX,
+              radiusY,
+            });
+
+            ctx.putImageData(imageData, 0, 0);
+            drawAllVoids(ctx, patchLabel);
+          };
+
+          document.addEventListener("mousemove", dragHandler);
+          document.addEventListener("mouseup", upHandler);
+        });
+
+        canvas.addEventListener("click", (e) => {
+          if (!deleteVoidMode) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (e.clientX - rect.left) * scaleX;
+          const y = (e.clientY - rect.top) * scaleY;
+
+          // 클릭한 점을 포함하는 보이드 찾기
+          let removed = false;
+          voidRecords = voidRecords.filter((v) => {
+            if (v.patchLabel !== patchLabel) return true;
+            // 타원 안에 들어가면 삭제
+            const dx = (x - v.centerX) / v.radiusX;
+            const dy = (y - v.centerY) / v.radiusY;
+            const inside = dx * dx + dy * dy <= 1;
+            if (inside && !removed) {
+              removed = true;
+              return false; // 삭제
+            }
+            return true;
+          });
+
+          if (removed) {
+            ctx.putImageData(imageData, 0, 0); // 원본 복원
+            drawAllVoids(ctx, patchLabel); // 남은 보이드 다시 그리기
+          }
+        });
+      }
+
+      // 특정 패치에 저장된 모든 보이드 다시 그리기
+      function drawAllVoids(ctx, patchLabel) {
+        ctx.lineWidth = 2;
+        voidRecords
+          .filter((v) => v.patchLabel === patchLabel)
+          .forEach((v) => {
+            ctx.beginPath();
+            const color = voidColors[v.type] || voidColors.default;
+            ctx.strokeStyle = color;
+            ctx.ellipse(
+              v.centerX,
+              v.centerY,
+              v.radiusX,
+              v.radiusY,
+              0,
+              0,
+              2 * Math.PI
+            );
+            ctx.stroke();
+          });
+      }
+
       // === 이벤트 ===
+
       tiffInput.onchange = (e) => {
         if (e.target.files[0]) loadTiff(e.target.files[0]);
       };
+
+      // 그리드 크기 변경 시 페이지 갱신
+      [colsInput, rowsInput, cellWInput, cellHInput].forEach((el) => {
+        el.removeEventListener("input", drawPage); // 혹시 중복 방지
+        el.addEventListener("input", () => {
+          drawPage(); // 페이지네이션 유지
+        });
+      });
+
+      // CSV 파일 업로드
       csvInput.onchange = async (e) => {
-        if (e.target.files[0])
-          csvRows = parseCSV(await e.target.files[0].text());
+        if (e.target.files[0]) {
+          csvRows = parseBondingMap(await e.target.files[0].text());
+          chipPoints = csvRows.map((r) => ({ x: r.x, y: r.y }));
+          drawPage(); // CSV 로드 후 바로 그리드와 점 갱신
+        }
       };
+
+      // 엑셀 복붙
       csvPaste.addEventListener("paste", (e) => {
         const text = e.clipboardData.getData("text");
-        csvRows = parseCSV(text);
+        csvRows = parseBondingMap(text);
+        chipPoints = csvRows.map((r) => ({ x: r.x, y: r.y }));
         alert(`복붙한 ${csvRows.length}개의 chip 좌표 로드 완료`);
+        drawPage();
       });
-      [colsInput, rowsInput, cellWInput, cellHInput].forEach((el) =>
-        el.addEventListener("input", drawPage)
-      );
-
       // 드래그로 origin 이동
       let dragging = false;
       let start = { x: 0, y: 0 };
@@ -375,8 +645,8 @@
           ((e.clientY - rect.top) * waferCanvas.height) / rect.height;
         const cellW = +cellWInput.value;
         const cellH = +cellHInput.value;
-        const gx = Math.floor((clickX - origin.x) / cellW);
-        const gy = Math.floor((clickY - origin.y) / cellH);
+        const gx = Math.floor((clickX - origin.x / currentScale) / cellW);
+        const gy = Math.floor((clickY - origin.y / currentScale) / cellH);
         refGrid = { x: gx, y: gy };
         refXInput.value = gx;
         refYInput.value = gy;
@@ -386,90 +656,166 @@
         drawPage();
       });
 
+      const targetMeanInput = document.getElementById("targetMean");
+      const targetStdInput = document.getElementById("targetStd");
+      const padPxInput = document.getElementById("padPx");
+
+      let allPatchPages = []; // 좌표별 페이지 (각 페이지 = {coord, layers:[canvas…]})
+      let currentPatchPage = 0;
+
+      // 기존 extractBtn.onclick 교체
       extractBtn.onclick = () => {
         if (!pages.length || !csvRows.length) return;
 
-        patchesDiv.innerHTML = "";
+        allPatchPages = [];
         const cellW = +cellWInput.value;
         const cellH = +cellHInput.value;
-        window.allPatchCanvases = []; // ZIP 저장용
+        const tMean = parseFloat(targetMeanInput.value);
+        const tStd = parseFloat(targetStdInput.value);
+        const pad = parseInt(padPxInput.value, 10);
+        window.allPatchCanvases = [];
 
         csvRows.forEach((r) => {
-          const coordWrap = document.createElement("div");
-          coordWrap.className = "coord-card";
-          coordWrap.innerHTML = `<h4 class="coord-title">Chip (${r.x}, ${r.y})</h4>`;
-          const layersWrap = document.createElement("div");
-          layersWrap.className = "layers-wrap";
+          const pageData = { coord: `(${r.x},${r.y})`, layers: [] };
 
           pages.forEach((src, pageIdx) => {
-            const gx = origin.x + (r.x + refGrid.x) * cellW;
-            const gy = origin.y + (r.y + refGrid.y) * cellH;
+            const gx = origin.x / currentScale + (r.x + refGrid.x) * cellW;
+            const gy = origin.y / currentScale + (r.y + refGrid.y) * cellH;
 
-            // ---- 타이틀용 캔버스 (위쪽 30px 여백) ----
-            const titleH = 30;
+            const titleH = 40;
             const c = document.createElement("canvas");
             c.width = cellW;
             c.height = cellH + titleH;
             const ctx = c.getContext("2d");
 
-            // 상단 배경(타이틀 바) 칠하기
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, cellW, titleH);
-
-            // 타이틀 텍스트
+            // 타이틀
             const label = `X${String(r.x).padStart(2, "0")}_Y${String(
               r.y
-            ).padStart(2, "0")}_L${String(pageIdx + 1).padStart(2, "0")}`;
+            ).padStart(2, "0")}_L${String(pageIdx + 1).padStart(2, "0")}_LEG:${
+              r.type || "NA"
+            }`;
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, cellW, titleH);
             ctx.fillStyle = "#fff";
             ctx.font = "20px sans-serif";
             ctx.textBaseline = "middle";
             ctx.fillText(label, 6, titleH / 2);
 
-            // 실제 패치 이미지를 타이틀 아래에 그리기
+            // 이미지 그리기
             ctx.drawImage(src, gx, gy, cellW, cellH, 0, titleH, cellW, cellH);
-            adjust(ctx); // 밝기/대비 조정 전체에 적용
+            const originalImageData = ctx.getImageData(0, 0, c.width, c.height);
 
-            // ---- 브라우저 뷰어에 추가 ----
-            const item = document.createElement("div");
-            item.className = "layer-item";
-            item.innerHTML = `<div class="layer-label">${label}</div>`;
-            item.appendChild(c);
-            layersWrap.appendChild(item);
+            // 마킹 이벤트 부착
+            attachVoidEvents(c, label, originalImageData);
 
-            // ZIP 저장용
+            // 밝기/대비 보정 (ROI 기반)
+            const subImg = ctx.getImageData(0, titleH, cellW, cellH);
+            const tmp = document.createElement("canvas");
+            tmp.width = cellW;
+            tmp.height = cellH;
+            tmp.getContext("2d").putImageData(subImg, 0, 0);
+            enhanceToTarget(tmp.getContext("2d"), tMean, tStd, pad);
+            ctx.putImageData(
+              tmp.getContext("2d").getImageData(0, 0, cellW, cellH),
+              0,
+              titleH
+            );
+
+            // 데이터 수집
+            pageData.layers.push({
+              canvas: c,
+              label,
+              type: r.type || "NA",
+              layer: pageIdx + 1,
+              imageData: originalImageData, // ★ 추가
+            });
+            const typeFolder = r.type
+              ? r.type.replace(/[^a-zA-Z0-9_-]/g, "_")
+              : "NA";
             window.allPatchCanvases.push({
               canvas: c,
               layer: pageIdx + 1,
               label,
+              type: typeFolder,
             });
           });
 
-          coordWrap.appendChild(layersWrap);
-          patchesDiv.appendChild(coordWrap);
+          allPatchPages.push(pageData);
         });
-      };
 
-      document.getElementById("downloadZipBtn").onclick = () => {
-        if (!window.allPatchCanvases || !window.allPatchCanvases.length) {
-          alert("먼저 Extract Patches를 실행하세요.");
+        currentPatchPage = 0;
+        showPatchPage(0);
+      };
+      // 페이지 표시 함수
+      function showPatchPage(idx) {
+        if (!allPatchPages.length) return;
+        if (idx < 0) idx = 0;
+        if (idx >= allPatchPages.length) idx = allPatchPages.length - 1;
+        currentPatchPage = idx;
+
+        const page = allPatchPages[idx];
+        const patchesDiv = document.getElementById("patches");
+        patchesDiv.innerHTML = "";
+        const wrap = document.createElement("div");
+        wrap.className = "coord-card";
+        wrap.innerHTML = `<h3 style="color:white">Chip ${page.coord}</h3>`;
+
+        const layersWrap = document.createElement("div");
+        layersWrap.className = "layers-wrap";
+        page.layers.forEach((l) => {
+          const item = document.createElement("div");
+          item.className = "layer-item";
+          item.innerHTML = `<div class="layer-label">${l.label}</div>`;
+          item.appendChild(l.canvas);
+          layersWrap.appendChild(item);
+        });
+        wrap.appendChild(layersWrap);
+        patchesDiv.appendChild(wrap);
+
+        document.getElementById("pageInfo").textContent = `Page ${
+          currentPatchPage + 1
+        } / ${allPatchPages.length}`;
+      }
+
+      // 네비게이션 버튼
+      document.getElementById("prevPage").onclick = () =>
+        showPatchPage(currentPatchPage - 1);
+      document.getElementById("nextPage").onclick = () =>
+        showPatchPage(currentPatchPage + 1);
+
+      document.getElementById("downloadVoids").onclick = () => {
+        if (!voidRecords.length) {
+          alert("No voids recorded.");
           return;
         }
-
-        const zip = new JSZip();
-
-        window.allPatchCanvases.forEach((p) => {
-          // 레이어별 폴더
-          const folder = zip.folder(
-            `layer_${String(p.layer).padStart(2, "0")}`
-          );
-          const dataURL = p.canvas.toDataURL("image/png").split(",")[1]; // base64
-          folder.file(`${p.label}.png`, dataURL, { base64: true });
+        const blob = new Blob([JSON.stringify(voidRecords, null, 2)], {
+          type: "application/json",
         });
-
-        zip.generateAsync({ type: "blob" }).then((content) => {
-          saveAs(content, "wafer_patches.zip");
-        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "void_records.json";
+        a.click();
+        URL.revokeObjectURL(url);
       };
+
+      // 숫자키 → 타입
+      const voidKeyMap = {
+        1: "void",
+        2: "crack",
+        3: "particle",
+      };
+      const typeSelect = document.getElementById("voidTypeSelect");
+
+      // 숫자 키 눌렀을 때 타입 변경
+      document.addEventListener("keydown", (e) => {
+        if (!voidMarkMode) return; // 마킹 모드일 때만
+        const newType = voidKeyMap[e.key];
+        if (newType) {
+          typeSelect.value = newType; // 드롭다운도 업데이트
+          console.log(`Void type set to: ${newType}`);
+        }
+      });
     </script>
   </body>
 </html>
