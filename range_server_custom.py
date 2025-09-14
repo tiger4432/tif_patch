@@ -314,7 +314,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Custom Range HTTP Server')
-    parser.add_argument('--port', '-p', type=int, default=8081, help='Port to serve on')
+    parser.add_argument('--port', '-p', type=int, default=8083, help='Port to serve on')
     parser.add_argument('--directory', '-d', default='.', help='Directory to serve')
     
     args = parser.parse_args()
