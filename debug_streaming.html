@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Streaming Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
+</head>
+<body>
+    <h1>🔍 Debug Streaming Test</h1>
+    <button onclick="testSmall()">Test Small File (realistic_wafer_sample_fast.tif)</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+    
+    <div style="margin: 10px 0; padding: 10px; background: #f0f0f0;">
+      <strong>Debug Info:</strong><br>
+      This page tests streaming with detailed debug output<br>
+      Check console for detailed processing information
+    </div>
+    
+    <div id="results"></div>
+    <div id="canvasArea" style="margin-top: 20px;"></div>
+
+    <script type="module">
+        import { ImageProcessor } from './js/imageProcessor.js';
+        
+        function log(message) {
+            const results = document.getElementById('results');
+            const time = new Date().toLocaleTimeString();
+            const logEntry = `<div style="margin: 2px 0; padding: 3px; background: #f9f9f9;">[${time}] ${message}</div>`;
+            results.innerHTML += logEntry;
+            console.log(`[${time}] ${message}`);
+        }
+        
+        function showCanvas(canvas, label) {
+            const canvasArea = document.getElementById('canvasArea');
+            const wrapper = document.createElement('div');
+            wrapper.style.margin = '10px';
+            wrapper.style.display = 'inline-block';
+            wrapper.innerHTML = `<div style="font-weight: bold; margin-bottom: 5px;">${label}</div>`;
+            
+            // 캔버스를 작게 표시 (200px 최대)
+            const displayCanvas = document.createElement('canvas');
+            const scale = Math.min(1, 200 / Math.max(canvas.width, canvas.height));
+            displayCanvas.width = canvas.width * scale;
+            displayCanvas.height = canvas.height * scale;
+            displayCanvas.style.border = '1px solid #333';
+            
+            const ctx = displayCanvas.getContext('2d');
+            ctx.drawImage(canvas, 0, 0, displayCanvas.width, displayCanvas.height);
+            
+            wrapper.appendChild(displayCanvas);
+            canvasArea.appendChild(wrapper);
+            
+            log(`📸 Canvas displayed: ${canvas.width}x${canvas.height} → ${displayCanvas.width}x${displayCanvas.height}`);
+        }
+        
+        window.testSmall = async function() {
+            log('🚀 Starting small file streaming test...');
+            
+            try {
+                const start = Date.now();
+                const pages = await ImageProcessor.loadTiffFromServer('./realistic_wafer_sample_fast.tif');
+                const duration = ((Date.now() - start) / 1000).toFixed(1);
+                
+                log(`✅ SUCCESS: Loaded ${pages.length} pages in ${duration}s`);
+                
+                // 각 페이지를 화면에 표시
+                pages.forEach((page, index) => {
+                    showCanvas(page, `Layer ${index + 1}`);
+                });
+                
+                // 메모리 상태 로그
+                if (performance.memory) {
+                    const used = (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(1);
+                    log(`💾 Memory used: ${used}MB`);
+                }
+                
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`);
+                console.error('Small file test error:', error);
+            }
+        };
+        
+        window.clearLogs = function() {
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('canvasArea').innerHTML = '';
+        };
+        
+        // 초기 메모리 상태
+        if (performance.memory) {
+            const initial = (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(1);
+            log(`🏁 Initial memory: ${initial}MB`);
+        }
+    </script>
+</body>
+</html>

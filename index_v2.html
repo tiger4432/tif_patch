@@ -1,0 +1,2287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wafer Grid Tool - V2</title>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist/geotiff.bundle.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        display: flex;
+        height: 100vh;
+        background: #f8f9fa;
+        color: #2c3e50;
+      }
+
+      #left {
+        width: 22%;
+        height: 100vh;
+        overflow-y: auto;
+        background: #ffffff;
+        border-right: 1px solid #dee2e6;
+        padding: 12px;
+        box-shadow: 1px 0 3px rgba(0, 0, 0, 0.1);
+      }
+
+      #center {
+        width: 56%;
+        height: 100vh;
+        overflow: auto;
+        background: #f1f3f4;
+        border-right: 1px solid #dee2e6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+
+      #right {
+        width: 22%;
+        height: 100vh;
+        overflow-y: auto;
+        background: #ffffff;
+        box-shadow: -1px 0 3px rgba(0, 0, 0, 0.1);
+      }
+
+      #patches {
+        margin: 12px;
+      }
+      canvas {
+        max-width: 95%;
+        max-height: 95%;
+        cursor: grab;
+        border-radius: 8px;
+        object-fit: contain;
+      }
+      canvas.dragging {
+        cursor: grabbing;
+      }
+
+      /* Form Elements */
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
+        width: 100%;
+        padding: 6px 10px;
+        margin: 3px 0;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 13px;
+        transition: all 0.2s ease;
+        background: #ffffff;
+        color: #495057;
+      }
+
+      input[type="text"]:focus,
+      input[type="number"]:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
+      }
+
+      textarea {
+        height: 80px;
+        resize: vertical;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      button {
+        padding: 6px 12px;
+        margin: 3px 2px;
+        border: 1px solid #007bff;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        background: #007bff;
+        color: white;
+      }
+
+      button:hover {
+        background: #0056b3;
+        border-color: #0056b3;
+      }
+
+      button:active {
+        background: #004085;
+        border-color: #004085;
+      }
+
+      label {
+        display: block;
+        margin: 8px 0 3px 0;
+        font-weight: 500;
+        color: #495057;
+        font-size: 13px;
+      }
+      .coord-card {
+        border: 1px solid #bdc3c7;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+
+      .coord-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+      }
+
+      .coord-title {
+        margin: 0 0 10px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #2c3e50;
+        border-bottom: 2px solid #667eea;
+        padding-bottom: 6px;
+      }
+
+      .layers-wrap {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, 1fr);
+        gap: 12px;
+        padding: 8px 0;
+      }
+
+      .layer-item {
+        text-align: center;
+        background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+        padding: 12px;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        border: 2px solid transparent;
+      }
+
+      .layer-item:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(52, 73, 94, 0.4);
+        border-color: #3498db;
+      }
+
+      .layer-label {
+        font-size: 12px;
+        color: #bdc3c7;
+        margin-bottom: 8px;
+        font-weight: 500;
+      }
+
+      .layer-item canvas {
+        max-width: 100%;
+        border: 2px solid #7f8c8d;
+        border-radius: 6px;
+        transition: border-color 0.3s ease;
+      }
+
+      .layer-item:hover canvas {
+        border-color: #3498db;
+      }
+      .mode-on {
+        background: linear-gradient(
+          135deg,
+          #27ae60 0%,
+          #2ecc71 100%
+        ) !important;
+        color: white !important;
+        font-weight: bold;
+        box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4) !important;
+        transform: translateY(-1px) !important;
+      }
+
+      #topControls {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        padding: 12px;
+        background: rgb(255, 255, 255);
+      }
+
+      #voidControls {
+        padding: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        background: rgba(52, 73, 94);
+        border-radius: 8px;
+        margin-bottom: 8px;
+      }
+
+      #voidControls button {
+        padding: 8px 16px;
+        border: 2px solid #7f8c8d;
+        background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+        color: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-weight: 500;
+        font-size: 13px;
+      }
+
+      #voidControls button:hover {
+        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+        border-color: #3498db;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+      }
+
+      /* Special styling for important buttons */
+      .info-panel {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 8px 0;
+      }
+
+      .highlight-box {
+        background: #e9ecef;
+        border: 1px solid #adb5bd;
+        border-radius: 6px;
+        padding: 10px;
+        margin: 6px 0;
+      }
+
+      /* Headers and Sections */
+      h3 {
+        color: #343a40;
+        margin: 16px 0 10px 0;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #dee2e6;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      #voidControls select {
+        padding: 6px;
+        background: #333;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 4px;
+      }
+
+      #voidJson {
+        width: 100%;
+        height: 120px;
+        font-family: "Courier New", monospace;
+        font-size: 10px;
+        background: #2c3e50;
+        color: #ecf0f1;
+        border: 1px solid #34495e;
+        border-radius: 4px;
+        padding: 8px;
+        margin-bottom: 8px;
+        resize: vertical;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="left">
+      <h3>Load Data</h3>
+      <div class="highlight-box" style="margin: 8px 0">
+        <input
+          id="localTiffPath"
+          type="text"
+          placeholder="예: /large_wafer_500chip_14900x14900_11layers.tif"
+          style="font-size: 12px; margin-bottom: 4px"
+        />
+        <button id="loadLocalTiff" style="font-size: 12px">Load TIFF</button>
+        <div
+          id="memoryStatus"
+          style="font-size: 12px; color: #6c757d; margin-top: 4px"
+        >
+          Memory: Ready
+        </div>
+        <div id="progressContainer" style="margin-top: 4px; display: none">
+          <div style="font-size: 10px; margin-bottom: 2px">
+            <span id="progressText">Loading...</span>
+          </div>
+          <div
+            style="
+              background: #ddd;
+              border-radius: 2px;
+              height: 4px;
+              overflow: hidden;
+            "
+          >
+            <div
+              id="progressBar"
+              style="
+                background: linear-gradient(to right, #4caf50, #2196f3);
+                height: 100%;
+                width: 0%;
+                transition: width 0.3s ease;
+              "
+            ></div>
+          </div>
+          <div style="font-size: 11px; color: #6c757d; margin-top: 1px">
+            <span id="progressDetails"></span>
+          </div>
+        </div>
+      </div>
+      <textarea
+        id="csvPaste"
+        placeholder="Bonding Map 붙여넣기"
+        style="height: 60px; font-size: 11px"
+      ></textarea>
+      <div style="margin-top: 6px">
+        <label style="font-size: 13px; color: #495057"
+          >Page:
+          <select id="pageSelect" style="font-size: 12px"></select
+        ></label>
+      </div>
+
+      <h3>Compression Settings</h3>
+      <div class="info-panel" style="margin-bottom: 12px; padding: 8px">
+        <strong style="font-size: 14px">Max Size:</strong>
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-top: 4px;
+            font-size: 12px;
+          "
+        >
+          <label
+            ><input type="radio" name="compression" value="2048" checked />
+            2K</label
+          >
+          <label
+            ><input type="radio" name="compression" value="4096" /> 4K</label
+          >
+          <label
+            ><input type="radio" name="compression" value="6144" /> 6K</label
+          >
+          <label
+            ><input type="radio" name="compression" value="8192" /> 8K</label
+          >
+        </div>
+      </div>
+
+      <h3>Grid</h3>
+      Cols <input id="cols" type="number" value="8" /><br />
+      Rows <input id="rows" type="number" value="8" /><br />
+      Cell W <input id="cellW" type="number" value="100" /><br />
+      Cell H <input id="cellH" type="number" value="100" /><br />
+
+      <div style="margin-top: 10px">
+        <strong>Patch Alignment Preview:</strong><br />
+        <canvas
+          id="gridPreview"
+          width="300"
+          height="200"
+          style="border: 1px solid #ccc; margin-top: 5px"
+        ></canvas>
+        <div
+          id="previewStatus"
+          style="font-size: 11px; color: #666; margin-top: 2px"
+        >
+          Load TIFF to see patch samples
+        </div>
+      </div>
+      <br />
+
+      <h3>Reference Point</h3>
+      빨간점 좌표 지정:<br />
+      X: <input id="refX" type="number" value="0" style="width: 60px" /> Y:
+      <input id="refY" type="number" value="0" style="width: 60px" />
+      <button id="setRefBtn">Apply</button><br />
+      <small style="color: #666">빨간점이 표시될 칩 좌표를 입력하세요</small
+      ><br /><br />
+
+      <h3>Enhance</h3>
+      Contrast α <input id="alpha" type="number" step="0.1" value="1.2" /><br />
+      Brightness β <input id="beta" type="number" value="10" /><br /><br />
+
+      <h3>Enhance Target</h3>
+      Target Mean
+      <input id="targetMean" type="number" step="0.01" value="0.5" /><br />
+      Target Std
+      <input id="targetStd" type="number" step="0.01" value="0.2" /><br />
+      Padding(px) <input id="padPx" type="number" value="10" /><br /><br />
+
+      <button id="extractBtn">Extract Patches</button>
+      <button id="downloadZipBtn">Download All Patches (ZIP)</button>
+      <button id="debugBtn">Debug Check</button>
+
+      <h3>Load Settings</h3>
+      <div class="highlight-box">
+        <textarea
+          id="metadataPaste"
+          placeholder="Metadata JSON 붙여넣기"
+          style="
+            height: 80px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+          "
+        ></textarea>
+        <button id="loadMetadata" style="font-size: 12px">
+          Apply Settings
+        </button>
+        <div style="font-size: 11px; color: #666; margin-top: 2px">
+          Paste metadata.json or void JSON to restore grid settings
+        </div>
+      </div>
+    </div>
+
+    <div id="center">
+      <canvas id="wafer"></canvas>
+    </div>
+
+    <div id="right">
+      <div id="topControls">
+        <h3>Patches</h3>
+        <div id="voidControls">
+          <textarea id="voidJson"></textarea>
+          <button id="toggleVoidMode">Mark Void</button>
+          <button id="toggleDeleteMode">Delete Void</button>
+          <select id="voidTypeSelect">
+            <option value="void">void</option>
+            <option value="crack">crack</option>
+            <option value="particle">particle</option>
+            <option value="bbox">bbox</option>
+          </select>
+          <button id="toggleSyncMode">Sync Layers</button>
+          <button id="downloadVoids">Download Voids JSON</button>
+          <button id="voidStats">Void Stats</button>
+        </div>
+        <div id="patchNav" style="margin-bottom: 10px; text-align: center">
+          <button id="prevPage">◀ Prev</button>
+          <span id="pageInfo"></span>
+          <button id="nextPage">Next ▶</button>
+        </div>
+      </div>
+      <div id="patches"></div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
+    <script type="module">
+      // UTIF 라이브러리 임포트
+      import UTIF from "https://cdn.skypack.dev/utif";
+      window.UTIF = UTIF;
+
+      // 모듈 임포트
+      import { VOID_COLORS, VOID_KEY_MAP, CONFIG } from "./js/constants.js";
+      import {
+        padCoord,
+        parsePatchLabel,
+        parseBondingMap,
+        parseCSV,
+      } from "./js/utils.js";
+      import { VoidManagerV2 } from "./js/voidManager_v2.js";
+      import { ImageProcessor } from "./js/imageProcessor.js";
+
+      // 전역 상태
+      class WaferAppV2 {
+        constructor() {
+          this.pages = [];
+          this.pageIndex = 0;
+          this.currentScale = 1;
+          this.origin = { x: 50, y: 50 };
+          this.refGrid = { x: 0, y: 0 };
+          this.csvRows = [];
+          this.chipPoints = [];
+          this.allPatchPages = [];
+          this.currentPatchPage = 0;
+          this.currentTiffFileName = null; // 현재 로드된 TIFF 파일명
+
+          // 새로운 보이드 매니저
+          this.voidManager = new VoidManagerV2();
+          this.voidMarkMode = false;
+          this.deleteVoidMode = false;
+          this.selectedVoid = null;
+          this.resizeMode = false;
+
+          // 그리드 프리뷰 초기화
+          this.gridPreviewCanvas = document.getElementById("gridPreview");
+          this.gridPreviewCtx = this.gridPreviewCanvas.getContext("2d");
+
+          this.initializeUI();
+          this.setupEventHandlers();
+          this.setupVoidJsonSync();
+        }
+
+        // Progress Bar Methods
+        showProgress() {
+          const container = document.getElementById("progressContainer");
+          container.style.display = "block";
+          this.updateProgress(0, "Initializing TIFF loading...", "");
+        }
+
+        hideProgress() {
+          const container = document.getElementById("progressContainer");
+          container.style.display = "none";
+        }
+
+        updateProgress(percentage, text = "", details = "") {
+          const progressBar = document.getElementById("progressBar");
+          const progressText = document.getElementById("progressText");
+          const progressDetails = document.getElementById("progressDetails");
+
+          progressBar.style.width = `${Math.min(
+            100,
+            Math.max(0, percentage)
+          )}%`;
+          if (text) progressText.textContent = text;
+          if (details) progressDetails.textContent = details;
+        }
+
+        initializeUI() {
+          this.waferCanvas = document.getElementById("wafer");
+          this.waferCtx = this.waferCanvas.getContext("2d");
+          this.pageSelect = document.getElementById("pageSelect");
+
+          this.markBtn = document.getElementById("toggleVoidMode");
+          this.deleteBtn = document.getElementById("toggleDeleteMode");
+          this.syncBtn = document.getElementById("toggleSyncMode");
+
+          this.syncBtn.classList.toggle("mode-on", this.voidManager.syncMode);
+        }
+
+        setupEventHandlers() {
+          // 로컬 서버에서 TIFF 로드 (Range 서버 사용)
+          document.getElementById("loadLocalTiff").onclick = async () => {
+            const filePath = document.getElementById("localTiffPath").value;
+            if (!filePath) {
+              alert("파일 경로를 입력해주세요 (예: /large_image.tif)");
+              return;
+            }
+
+            const loadBtn = document.getElementById("loadLocalTiff");
+            const originalText = loadBtn.textContent;
+
+            try {
+              loadBtn.textContent = "Loading...";
+              loadBtn.disabled = true;
+
+              // Range 서버 URL 구성 (포트 8083 사용)
+              const rangeServerUrl = `http://localhost:8083${
+                filePath.startsWith("/") ? filePath : "/" + filePath
+              }`;
+
+              // 파일명 추출 및 저장
+              const fileName = filePath.split("/").pop() || filePath;
+              this.currentTiffFileName = fileName.replace(/\.[^/.]+$/, ""); // 확장자 제거
+
+              console.log("Loading from Range server:", rangeServerUrl);
+              console.log("TIFF file name:", this.currentTiffFileName);
+
+              // 메모리 사용량 모니터링 시작
+              const memoryStatus = document.getElementById("memoryStatus");
+              let initialMemory = null;
+
+              try {
+                if (typeof ImageProcessor.getMemoryUsage === "function") {
+                  initialMemory = ImageProcessor.getMemoryUsage();
+                  if (initialMemory) {
+                    console.log("Initial memory usage:", initialMemory);
+                    memoryStatus.textContent = `Memory: ${initialMemory.used}MB / ${initialMemory.limit}MB`;
+                  } else {
+                    memoryStatus.textContent = "Memory: Not supported";
+                  }
+                } else {
+                  console.warn("getMemoryUsage method not available");
+                  memoryStatus.textContent = "Memory: Method not available";
+                }
+              } catch (error) {
+                console.error("Memory monitoring error:", error);
+                memoryStatus.textContent = "Memory: Error";
+              }
+
+              console.log("loadtitff");
+
+              // 프로그레스바 표시
+              this.showProgress();
+
+              try {
+                // Range 서버를 통한 메모리 최적화된 TIFF 로딩
+                this.updateProgress(
+                  10,
+                  "Connecting to Range server...",
+                  rangeServerUrl
+                );
+                this.pages = await ImageProcessor.loadTiffFromServer(
+                  rangeServerUrl,
+                  (current, total, details) => {
+                    const progress = 10 + (current / total) * 90; // 10-80%
+                    this.updateProgress(
+                      progress,
+                      `Loading page ${current}/${total}`,
+                      details
+                    );
+                  }
+                );
+
+                this.updateProgress(
+                  85,
+                  "Processing pages...",
+                  "Updating page selector"
+                );
+                this.updatePageSelect();
+
+                this.updateProgress(
+                  90,
+                  "Rendering image...",
+                  "Drawing current page"
+                );
+                await this.drawPage();
+
+                this.updateProgress(
+                  95,
+                  "Updating preview...",
+                  "Grid preview generation"
+                );
+                this.updateGridPreview();
+
+                this.updateProgress(
+                  100,
+                  "Loading complete!",
+                  `${this.pages.length} pages loaded successfully`
+                );
+
+                // 2초 후 프로그레스바 숨기기
+                setTimeout(() => this.hideProgress(), 2000);
+              } catch (error) {
+                this.updateProgress(0, "Loading failed", error.message);
+                setTimeout(() => this.hideProgress(), 3000);
+                throw error;
+              }
+
+              // 최종 메모리 사용량 확인
+              try {
+                if (typeof ImageProcessor.getMemoryUsage === "function") {
+                  const finalMemory = ImageProcessor.getMemoryUsage();
+                  if (finalMemory && initialMemory) {
+                    console.log("Final memory usage:", finalMemory);
+                    const memoryIncrease =
+                      finalMemory.used - initialMemory.used;
+                    console.log("Memory increase:", memoryIncrease, "MB");
+                    memoryStatus.textContent = `Memory: ${finalMemory.used}MB / ${finalMemory.limit}MB (+${memoryIncrease}MB)`;
+                  } else if (finalMemory) {
+                    memoryStatus.textContent = `Memory: ${finalMemory.used}MB / ${finalMemory.limit}MB`;
+                  } else {
+                    memoryStatus.textContent = "Memory: Load Complete";
+                  }
+                } else {
+                  memoryStatus.textContent = "Memory: Load Complete";
+                }
+              } catch (error) {
+                console.error("Final memory check error:", error);
+                memoryStatus.textContent = "Memory: Load Complete";
+              }
+
+              // 성공 메시지
+              const finalMemoryText = memoryStatus.textContent.includes("MB")
+                ? memoryStatus.textContent.split(" ")[1]
+                : "N/A";
+              alert(
+                `로컬 서버에서 로드 완료!\n페이지 수: ${this.pages.length}\n메모리 상태: ${finalMemoryText}`
+              );
+            } catch (error) {
+              alert(error.message);
+              console.error("Local server loading error:", error);
+            } finally {
+              loadBtn.textContent = originalText;
+              loadBtn.disabled = false;
+            }
+          };
+
+          // CSV 붙여넣기
+          document
+            .getElementById("csvPaste")
+            .addEventListener("paste", async (e) => {
+              const text = e.clipboardData.getData("text");
+              this.csvRows = parseBondingMap(text);
+              this.chipPoints = this.csvRows.map((r) => ({ x: r.x, y: r.y }));
+              alert(`복붙한 ${this.csvRows.length}개의 chip 좌표 로드 완료`);
+              await this.drawPage();
+              this.updateGridPreview();
+            });
+
+          // 페이지 선택
+          this.pageSelect.addEventListener("change", async (e) => {
+            this.pageIndex = parseInt(e.target.value) || 0;
+            await this.drawPage();
+            this.updateGridPreview();
+          });
+
+          // 압축 설정 변경
+          document
+            .querySelectorAll('input[name="compression"]')
+            .forEach((radio) => {
+              radio.addEventListener("change", (e) => {
+                if (e.target.checked) {
+                  ImageProcessor.updateCompressionSettings(e.target.value);
+                  console.log(
+                    "Compression setting changed to:",
+                    e.target.value
+                  );
+
+                  // 메모리 상태 업데이트
+                  this.updateMemoryStatus();
+                }
+              });
+            });
+
+          // 그리드 변경
+          ["cols", "rows", "cellW", "cellH"].forEach((id) => {
+            document.getElementById(id).addEventListener("input", async () => {
+              await this.drawPage();
+              this.updateGridPreview();
+            });
+          });
+
+          // Void 관련 버튼들
+          this.markBtn.onclick = () => {
+            this.voidMarkMode = !this.voidMarkMode;
+            this.markBtn.classList.toggle("mode-on", this.voidMarkMode);
+          };
+
+          this.deleteBtn.onclick = () => {
+            this.deleteVoidMode = !this.deleteVoidMode;
+            this.deleteBtn.classList.toggle("mode-on", this.deleteVoidMode);
+          };
+
+          this.syncBtn.onclick = () => {
+            const newState = this.voidManager.toggleSyncMode();
+            this.syncBtn.classList.toggle("mode-on", newState);
+            this.refreshCurrentPatches();
+          };
+
+          // 기타 버튼들
+          document.getElementById("extractBtn").onclick = async () =>
+            await this.extractPatches();
+          document.getElementById("downloadZipBtn").onclick = () =>
+            this.downloadZip();
+          document.getElementById("downloadVoids").onclick = () =>
+            this.downloadVoids();
+          document.getElementById("voidStats").onclick = () =>
+            this.showVoidStats();
+          document.getElementById("debugBtn").onclick = () => this.debugCheck();
+
+          // 메타데이터 로드 (복붙 방식)
+          document.getElementById("loadMetadata").onclick = async () => {
+            const textarea = document.getElementById("metadataPaste");
+            const text = textarea.value.trim();
+
+            if (!text) {
+              alert("Please paste metadata JSON first.");
+              return;
+            }
+
+            try {
+              const jsonData = JSON.parse(text);
+              const metadata = this.extractMetadataFromJson(jsonData);
+
+              if (!metadata) {
+                alert(
+                  "Invalid metadata format. Please paste a valid metadata.json or void JSON content."
+                );
+                return;
+              }
+
+              const success = this.applyMetadata(metadata);
+              if (success) {
+                // 그리드 다시 그리기
+                await this.drawPage();
+                this.updateGridPreview();
+
+                alert(
+                  `Settings loaded successfully!\nTIFF: ${
+                    metadata.tiffFileName || "Unknown"
+                  }\nGrid: ${metadata.gridSettings?.cols}x${
+                    metadata.gridSettings?.rows
+                  }\nCell: ${metadata.gridSettings?.cellW}x${
+                    metadata.gridSettings?.cellH
+                  }`
+                );
+
+                console.log("Loaded metadata:", metadata);
+
+                // textarea 초기화
+                textarea.value = "";
+              } else {
+                alert("Failed to apply metadata settings.");
+              }
+            } catch (error) {
+              console.error("Error loading metadata:", error);
+              alert("Failed to parse JSON. Please check the format.");
+            }
+          };
+
+          // 캔버스 드래그
+          this.setupCanvasDrag();
+
+          // 기준점 설정
+          this.setupReferenceMode();
+
+          // 패치 네비게이션
+          document.getElementById("prevPage").onclick = async () =>
+            await this.showPatchPage(this.currentPatchPage - 1);
+          document.getElementById("nextPage").onclick = async () =>
+            await this.showPatchPage(this.currentPatchPage + 1);
+
+          // 키보드 단축키
+          document.addEventListener("keydown", (e) => {
+            if (!this.voidMarkMode) return;
+            const newType = VOID_KEY_MAP[e.key];
+            if (newType) {
+              document.getElementById("voidTypeSelect").value = newType;
+            }
+          });
+
+          // 초기 그리드 프리뷰 업데이트
+          this.updateGridPreview();
+
+          // 웨이퍼 캔버스 클릭 이벤트 (파란점 클릭으로 패치 이동)
+          this.setupWaferCanvasClick();
+        }
+
+        /**
+         * 웨이퍼 캔버스 클릭 이벤트 설정
+         */
+        setupWaferCanvasClick() {
+          this.waferCanvas.addEventListener("click", async (e) => {
+            // 드래그 중이거나 보이드 마킹 모드일 때는 무시
+            if (this.voidMarkMode || this.deleteVoidMode) return;
+
+            const rect = this.waferCanvas.getBoundingClientRect();
+            const scaleX = this.waferCanvas.width / rect.width;
+            const scaleY = this.waferCanvas.height / rect.height;
+
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+
+            // 클릭한 좌표를 그리드 좌표로 변환
+            const cellW =
+              +document.getElementById("cellW").value * this.currentScale;
+            const cellH =
+              +document.getElementById("cellH").value * this.currentScale;
+
+            const gridX = Math.floor(
+              (clickX - this.origin.x * this.currentScale) / cellW
+            );
+            const gridY = Math.floor(
+              (clickY - this.origin.y * this.currentScale) / cellH
+            );
+
+            // 실제 칩 좌표로 변환 (기준점 고려)
+            const chipX = gridX + this.refGrid.x;
+            const chipY = gridY + this.refGrid.y;
+
+            // Auto bbox detection 모드일 때 bbox 탐지 수행
+            if (this.voidManager.autoBboxDetection) {
+              await this.detectBboxForChip(chipX, chipY);
+              return;
+            }
+
+            // 해당 좌표의 패치를 찾아서 이동
+            await this.navigateToChipPatch(chipX, chipY);
+          });
+        }
+
+        /**
+         * 특정 칩에서 bbox 탐지 수행
+         */
+        async detectBboxForChip(chipX, chipY) {
+          console.log(`Detecting bbox for chip (${chipX}, ${chipY})`);
+
+          // 해당 칩의 패치 찾기
+          const targetCoord = `(${chipX},${chipY})`;
+          const targetPatch = this.allPatchPages.find(
+            (patch) => patch.coord === targetCoord
+          );
+
+          if (!targetPatch) {
+            console.log(`No patch found for chip (${chipX}, ${chipY})`);
+            return;
+          }
+
+          // 각 레이어에서 bbox 탐지 수행
+          for (const layerData of targetPatch.layers) {
+            if (layerData.canvas) {
+              const detectedBboxes = this.voidManager.detectBboxFromImage(
+                layerData.canvas,
+                chipX,
+                chipY,
+                300
+              );
+
+              console.log(
+                `Detected ${detectedBboxes.length} bboxes for chip (${chipX}, ${chipY}) layer ${layerData.layer}`
+              );
+            }
+          }
+
+          // 화면 업데이트
+          this.refreshCurrentPatches();
+        }
+
+        /**
+         * 특정 칩 좌표의 패치로 이동
+         */
+        async navigateToChipPatch(chipX, chipY) {
+          if (this.allPatchPages.length === 0) return;
+
+          // 해당 좌표의 패치 찾기
+          const targetCoord = `(${chipX},${chipY})`;
+          const patchIndex = this.allPatchPages.findIndex(
+            (patch) => patch.coord === targetCoord
+          );
+
+          if (patchIndex !== -1) {
+            this.currentPatchPage = patchIndex;
+            await this.showPatchPage(patchIndex);
+            await this.drawPage(); // 초록점 업데이트
+
+            console.log(
+              `Navigated to patch: ${targetCoord} (index: ${patchIndex})`
+            );
+          } else {
+            console.log(`No patch found for coordinates: ${targetCoord}`);
+          }
+        }
+
+        updatePageSelect() {
+          this.pageSelect.innerHTML = this.pages
+            .map((_, i) => `<option value="${i}">Page ${i + 1}</option>`)
+            .join("");
+          this.pageIndex = 0;
+        }
+
+        async drawPage() {
+          if (!this.pages.length) return;
+
+          const src = this.pages[this.pageIndex];
+
+          // 메모리 사용량 모니터링
+          const memory = ImageProcessor.getMemoryUsage();
+          if (memory) {
+            console.log(
+              `Current memory usage: ${memory.used}MB / ${memory.limit}MB`
+            );
+
+            // 메모리 사용량이 높으면 경고
+            if (memory.used / memory.limit > 0.8) {
+              console.warn("High memory usage detected");
+            }
+          }
+
+          this.currentScale = ImageProcessor.drawPage(src, this.waferCanvas);
+          this.drawGrid();
+        }
+
+        drawGrid() {
+          if (!this.pages.length) return;
+
+          const cols = +document.getElementById("cols").value;
+          const rows = +document.getElementById("rows").value;
+          const cellW =
+            +document.getElementById("cellW").value * this.currentScale;
+          const cellH =
+            +document.getElementById("cellH").value * this.currentScale;
+
+          // 기준점도 스케일 적용
+          const scaledOriginX = this.origin.x * this.currentScale;
+          const scaledOriginY = this.origin.y * this.currentScale;
+
+          this.waferCtx.strokeStyle = "lime";
+          this.waferCtx.lineWidth = 1;
+
+          // 수직선 그리기
+          for (let i = 0; i <= cols; i++) {
+            const x = scaledOriginX + i * cellW;
+            this.waferCtx.beginPath();
+            this.waferCtx.moveTo(x, scaledOriginY);
+            this.waferCtx.lineTo(x, scaledOriginY + rows * cellH);
+            this.waferCtx.stroke();
+          }
+
+          // 수평선 그리기
+          for (let j = 0; j <= rows; j++) {
+            const y = scaledOriginY + j * cellH;
+            this.waferCtx.beginPath();
+            this.waferCtx.moveTo(scaledOriginX, y);
+            this.waferCtx.lineTo(scaledOriginX + cols * cellW, y);
+            this.waferCtx.stroke();
+          }
+
+          // 칩 포인트 (파란 점) - 스케일 적용
+          this.waferCtx.fillStyle = "deepskyblue";
+          this.chipPoints.forEach((pt) => {
+            const px = scaledOriginX + (pt.x - this.refGrid.x + 0.5) * cellW;
+            const py = scaledOriginY + (pt.y - this.refGrid.y + 0.5) * cellH;
+            this.waferCtx.beginPath();
+            this.waferCtx.arc(
+              px,
+              py,
+              Math.max(3, cellW * 0.05),
+              0,
+              2 * Math.PI
+            );
+            this.waferCtx.fill();
+          });
+
+          // 기준점 (빨간 점) - 스케일 적용
+          this.waferCtx.fillStyle = "red";
+          const refPixelX = scaledOriginX + 0.5 * cellW;
+          const refPixelY = scaledOriginY + 0.5 * cellH;
+          this.waferCtx.beginPath();
+          this.waferCtx.arc(refPixelX, refPixelY, 6, 0, 2 * Math.PI);
+          this.waferCtx.fill();
+
+          // 현재 패치 (초록 점) - 스케일 적용
+          this.drawCurrentPatchIndicator(
+            cellW,
+            cellH,
+            scaledOriginX,
+            scaledOriginY
+          );
+        }
+
+        /**
+         * 현재 보고 있는 패치를 초록점으로 표시 (스케일 적용)
+         */
+        drawCurrentPatchIndicator(cellW, cellH, scaledOriginX, scaledOriginY) {
+          if (this.allPatchPages.length === 0) return;
+
+          const currentPatch = this.allPatchPages[this.currentPatchPage];
+          if (!currentPatch) return;
+
+          // 현재 패치의 좌표 파싱
+          const match = currentPatch.coord.match(/\((-?\d+),(-?\d+)\)/);
+          if (!match) {
+            console.log(
+              "Failed to parse patch coordinates:",
+              currentPatch.coord
+            );
+            return;
+          }
+
+          const patchX = parseInt(match[1], 10);
+          const patchY = parseInt(match[2], 10);
+
+          // 화면 좌표로 변환 (스케일 적용)
+          const px = scaledOriginX + (patchX - this.refGrid.x + 0.5) * cellW;
+          const py = scaledOriginY + (patchY - this.refGrid.y + 0.5) * cellH;
+
+          console.log(
+            `Drawing green dot for patch (${patchX},${patchY}) at screen (${px},${py})`
+          );
+
+          // 초록점 그리기 (빨간점보다 약간 크게)
+          this.waferCtx.fillStyle = "lime";
+          this.waferCtx.beginPath();
+          this.waferCtx.arc(px, py, 8, 0, 2 * Math.PI);
+          this.waferCtx.fill();
+
+          // 테두리 추가 (가독성 향상)
+          this.waferCtx.strokeStyle = "darkgreen";
+          this.waferCtx.lineWidth = 2;
+          this.waferCtx.stroke();
+        }
+
+        setupCanvasDrag() {
+          let dragging = false;
+          let start = { x: 0, y: 0 };
+          let previewUpdateTimeout = null;
+
+          this.waferCanvas.addEventListener("mousedown", (e) => {
+            dragging = true;
+            this.waferCanvas.classList.add("dragging");
+            start.x = e.clientX;
+            start.y = e.clientY;
+          });
+
+          window.addEventListener("mouseup", () => {
+            if (dragging) {
+              dragging = false;
+              this.waferCanvas.classList.remove("dragging");
+              // 드래그 완료 시 즉시 프리뷰 업데이트
+              this.updateGridPreview();
+            }
+          });
+
+          window.addEventListener("mousemove", async (e) => {
+            if (!dragging) return;
+            const deltaX = e.clientX - start.x;
+            const deltaY = e.clientY - start.y;
+
+            // 스케일을 고려한 드래그
+            this.origin.x += deltaX / this.currentScale;
+            this.origin.y += deltaY / this.currentScale;
+
+            start.x = e.clientX;
+            start.y = e.clientY;
+            await this.drawPage();
+
+            // 드래그 중 프리뷰 업데이트 (throttling 적용)
+            if (previewUpdateTimeout) {
+              clearTimeout(previewUpdateTimeout);
+            }
+            previewUpdateTimeout = setTimeout(() => {
+              this.updateGridPreview();
+            }, 100); // 100ms 딜레이
+          });
+        }
+
+        setupReferenceMode() {
+          const setRefBtn = document.getElementById("setRefBtn");
+          const refXInput = document.getElementById("refX");
+          const refYInput = document.getElementById("refY");
+
+          // 좌표 입력값이 변경될 때마다 실시간 업데이트
+          const updateReference = async () => {
+            const refX = parseInt(refXInput.value) || 0;
+            const refY = parseInt(refYInput.value) || 0;
+
+            this.refGrid = { x: refX, y: refY };
+            await this.drawPage();
+            this.updateGridPreview();
+
+            console.log(`Reference point set to: (${refX}, ${refY})`);
+          };
+
+          // Apply Reference 버튼 클릭
+          setRefBtn.onclick = updateReference;
+
+          // Enter 키 처리
+          refXInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") updateReference();
+          });
+
+          refYInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") updateReference();
+          });
+
+          // 실시간 업데이트 (선택사항)
+          refXInput.addEventListener("input", updateReference);
+          refYInput.addEventListener("input", updateReference);
+        }
+
+        async extractPatches() {
+          if (!this.pages.length) {
+            alert("TIFF 파일을 먼저 로드해주세요!");
+            return;
+          }
+          if (!this.csvRows.length) {
+            alert("CSV 데이터를 먼저 로드해주세요!");
+            return;
+          }
+
+          // 기존 보이드 데이터 초기화
+          this.voidManager.voids.clear();
+          this.voidManager.voidIndexCounters.clear();
+          console.log("Void data cleared for new patch extraction");
+
+          this.allPatchPages = [];
+          const cellW = +document.getElementById("cellW").value;
+          const cellH = +document.getElementById("cellH").value;
+          const tMean = parseFloat(document.getElementById("targetMean").value);
+          const tStd = parseFloat(document.getElementById("targetStd").value);
+          const pad = parseInt(document.getElementById("padPx").value, 10);
+          window.allPatchCanvases = [];
+
+          this.csvRows.forEach((r) => {
+            const pageData = {
+              coord: `(${r.x},${r.y})`,
+              layers: [],
+              type: r.type,
+            };
+
+            this.pages.forEach((src, pageIdx) => {
+              const gx = this.origin.x + (r.x - this.refGrid.x) * cellW;
+              const gy = this.origin.y + (r.y - this.refGrid.y) * cellH;
+
+              console.log(gx, gy, cellW, cellH);
+
+              const titleH = 40;
+              const patchSize = 300; // 고정 패치 크기
+              const c = document.createElement("canvas");
+              c.width = patchSize;
+              c.height = (patchSize * cellH) / cellW + titleH;
+              const ctx = c.getContext("2d");
+
+              const label = `X${padCoord(r.x)}_Y${padCoord(r.y)}_L${String(
+                pageIdx + 1
+              ).padStart(2, "0")}_LEG:${r.type || "NA"}`;
+              ctx.fillStyle = "#000";
+              ctx.fillRect(0, 0, patchSize, titleH);
+              ctx.fillStyle = "#fff";
+              ctx.font = "20px sans-serif";
+              ctx.textBaseline = "middle";
+              ctx.fillText(label, 6, titleH / 2);
+
+              ctx.drawImage(
+                src,
+                gx,
+                gy,
+                cellW,
+                cellH,
+                0,
+                titleH,
+                patchSize,
+                (patchSize * cellH) / cellW
+              );
+
+              // 이미지 향상 먼저 수행
+              const subImg = ctx.getImageData(0, titleH, patchSize, patchSize);
+              const tmp = document.createElement("canvas");
+              tmp.width = patchSize;
+              tmp.height = patchSize;
+              tmp.getContext("2d").putImageData(subImg, 0, 0);
+              ImageProcessor.enhanceToTarget(
+                tmp.getContext("2d"),
+                tMean,
+                tStd,
+                pad
+              );
+              ctx.putImageData(
+                tmp.getContext("2d").getImageData(0, 0, patchSize, patchSize),
+                0,
+                titleH
+              );
+
+              // 보정 완료된 이미지 데이터 저장
+              const enhancedImageData = ctx.getImageData(
+                0,
+                0,
+                c.width,
+                c.height
+              );
+
+              this.attachVoidEvents(c, label, enhancedImageData);
+
+              pageData.layers.push({
+                canvas: c,
+                label,
+                type: r.type || "NA",
+                layer: pageIdx + 1,
+                imageData: enhancedImageData,
+              });
+
+              const typeFolder = r.type
+                ? r.type.replace(/[^a-zA-Z0-9_-]/g, "_")
+                : "NA";
+              window.allPatchCanvases.push({
+                canvas: c,
+                layer: pageIdx + 1,
+                label,
+                type: typeFolder,
+              });
+            });
+
+            this.allPatchPages.push(pageData);
+          });
+
+          this.currentPatchPage = 0;
+          await this.showPatchPage(0);
+
+          // 보이드 데이터 초기화 후 패치 뷰어 갱신
+          this.refreshCurrentPatches();
+
+          console.log(
+            `패치 추출 완료: ${this.allPatchPages.length}개 좌표, 총 ${
+              this.allPatchPages.length * this.pages.length
+            }개 패치`
+          );
+        }
+
+        attachVoidEvents(canvas, patchLabel, imageData) {
+          const ctx = canvas.getContext("2d");
+          const { chipCoord, layer } = parsePatchLabel(patchLabel);
+          const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+          if (!match) return;
+
+          const x = parseInt(match[1], 10);
+          const y = parseInt(match[2], 10);
+
+          const repaint = () => {
+            ctx.putImageData(imageData, 0, 0);
+            this.voidManager.drawVoids(ctx, patchLabel);
+          };
+
+          // 보이드 마킹
+          canvas.addEventListener("mousedown", (e) => {
+            if (!this.voidMarkMode) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const sx = (e.clientX - rect.left) * scaleX;
+            const sy = (e.clientY - rect.top) * scaleY;
+
+            const drag = (me) => {
+              const cx = (me.clientX - rect.left) * scaleX;
+              const cy = (me.clientY - rect.top) * scaleY;
+              repaint();
+              const selType =
+                document.getElementById("voidTypeSelect").value || "default";
+              ctx.strokeStyle = VOID_COLORS[selType] || VOID_COLORS.default;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+
+              if (selType === "bbox") {
+                // bbox 타입이면 사각형 그리기
+                ctx.strokeRect(
+                  Math.min(sx, cx),
+                  Math.min(sy, cy),
+                  Math.abs(cx - sx),
+                  Math.abs(cy - sy)
+                );
+              } else {
+                // 일반 void 타입이면 타원 그리기
+                ctx.ellipse(
+                  (sx + cx) / 2,
+                  (sy + cy) / 2,
+                  Math.abs(cx - sx) / 2,
+                  Math.abs(cy - sy) / 2,
+                  0,
+                  0,
+                  2 * Math.PI
+                );
+                ctx.stroke();
+              }
+            };
+
+            const up = (ue) => {
+              document.removeEventListener("mousemove", drag);
+              document.removeEventListener("mouseup", up);
+              const ex = (ue.clientX - rect.left) * scaleX;
+              const ey = (ue.clientY - rect.top) * scaleY;
+              const type =
+                document.getElementById("voidTypeSelect").value || "void";
+
+              let newVoid;
+
+              if (type === "bbox") {
+                // bbox 타입이면 사각형으로 저장
+                const rectX = Math.min(sx, ex);
+                const rectY = Math.min(sy, ey);
+                const rectW = Math.abs(ex - sx);
+                const rectH = Math.abs(ey - sy);
+
+                // bbox는 centerX, centerY에 좌상단 좌표를 저장하고 radiusX, radiusY에 너비, 높이를 저장
+                newVoid = this.voidManager.createVoid(
+                  patchLabel,
+                  type,
+                  rectX, // centerX에 x 좌표
+                  rectY, // centerY에 y 좌표
+                  rectW, // radiusX에 width
+                  rectH // radiusY에 height
+                );
+              } else {
+                // 일반 void 타입이면 타원으로 저장
+                const centerX = (sx + ex) / 2;
+                const centerY = (sy + ey) / 2;
+                const radiusX = Math.abs(ex - sx) / 2;
+                const radiusY = Math.abs(ey - sy) / 2;
+
+                newVoid = this.voidManager.createVoid(
+                  patchLabel,
+                  type,
+                  centerX,
+                  centerY,
+                  radiusX,
+                  radiusY
+                );
+              }
+
+              if (newVoid) {
+                this.refreshCurrentPatches();
+                this.updateVoidJsonDisplay(); // JSON 업데이트 추가
+              } else {
+                repaint();
+              }
+            };
+
+            // void 마킹 모드일 때만 void 이벤트 연결
+            if (this.voidMarkMode) {
+              document.addEventListener("mousemove", drag);
+              document.addEventListener("mouseup", up);
+            }
+          });
+
+          // 보이드 삭제 (해당 레이어에서만)
+          canvas.addEventListener("click", (e) => {
+            if (!this.deleteVoidMode) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+
+            console.log(
+              `Attempting to delete void at (${x},${y},${layer}) click:(${clickX},${clickY})`
+            );
+
+            const deleted = this.voidManager.deleteVoid(
+              x,
+              y,
+              layer,
+              clickX,
+              clickY
+            );
+
+            console.log(`Delete result: ${deleted}`);
+
+            if (deleted) {
+              this.refreshCurrentPatches();
+              this.updateVoidJsonDisplay(); // JSON 업데이트 추가
+            }
+          });
+
+          // 보이드 편집 (해당 레이어에서만)
+          canvas.addEventListener("mousedown", (e) => {
+            if (this.voidMarkMode || this.deleteVoidMode) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+
+            const editableVoid = this.voidManager.findEditableVoid(
+              x,
+              y,
+              layer,
+              clickX,
+              clickY
+            );
+            if (!editableVoid) return;
+
+            this.selectedVoid = editableVoid;
+            const originalCenterX = editableVoid.centerX;
+            const originalCenterY = editableVoid.centerY;
+
+            // 이동 vs 크기조절 판단
+            const dx = clickX - editableVoid.centerX;
+            const dy = clickY - editableVoid.centerY;
+            const angle = Math.atan2(dy, dx);
+            const rB =
+              (editableVoid.radiusX * editableVoid.radiusY) /
+              Math.sqrt(
+                (editableVoid.radiusY * Math.cos(angle)) ** 2 +
+                  (editableVoid.radiusX * Math.sin(angle)) ** 2
+              );
+            const dist = Math.hypot(dx, dy);
+
+            this.resizeMode = Math.abs(dist - rB) <= CONFIG.TOLERANCE;
+            const offsetX = clickX - editableVoid.centerX;
+            const offsetY = clickY - editableVoid.centerY;
+
+            const moveHandler = (me) => {
+              const mx = (me.clientX - rect.left) * scaleX;
+              const my = (me.clientY - rect.top) * scaleY;
+
+              if (this.resizeMode) {
+                const newRadiusX = Math.abs(mx - editableVoid.centerX);
+                const newRadiusY = Math.abs(my - editableVoid.centerY);
+
+                if (me.shiftKey) {
+                  const r = Math.max(newRadiusX, newRadiusY);
+                  editableVoid.radiusX = editableVoid.radiusY = r;
+                } else {
+                  editableVoid.radiusX = newRadiusX;
+                  editableVoid.radiusY = newRadiusY;
+                }
+              } else {
+                editableVoid.centerX = mx - offsetX;
+                editableVoid.centerY = my - offsetY;
+              }
+
+              repaint();
+            };
+
+            const upHandler = () => {
+              document.removeEventListener("mousemove", moveHandler);
+              document.removeEventListener("mouseup", upHandler);
+
+              // 변경사항 저장 (실제로는 이미 editableVoid 객체가 수정되었음)
+              this.refreshCurrentPatches();
+              this.updateVoidJsonDisplay(); // JSON 업데이트 추가
+              this.selectedVoid = null;
+            };
+
+            document.addEventListener("mousemove", moveHandler);
+            document.addEventListener("mouseup", upHandler);
+          });
+        }
+
+        refreshCurrentPatches() {
+          if (
+            !this.allPatchPages.length ||
+            this.currentPatchPage >= this.allPatchPages.length
+          )
+            return;
+
+          const currentPage = this.allPatchPages[this.currentPatchPage];
+          currentPage.layers.forEach((layerInfo) => {
+            const ctx = layerInfo.canvas.getContext("2d");
+            ctx.putImageData(layerInfo.imageData, 0, 0);
+            this.voidManager.drawVoids(ctx, layerInfo.label);
+          });
+
+          // void JSON 업데이트
+          this.updateVoidJsonDisplay();
+
+          // 패치 뷰어 전체 새로고침 (void 마스크 실시간 업데이트)
+          this.showPatchPage(this.currentPatchPage);
+        }
+
+        async showPatchPage(idx) {
+          if (!this.allPatchPages.length) return;
+          if (idx < 0) idx = 0;
+          if (idx >= this.allPatchPages.length)
+            idx = this.allPatchPages.length - 1;
+          this.currentPatchPage = idx;
+
+          const page = this.allPatchPages[idx];
+          const patchesDiv = document.getElementById("patches");
+          patchesDiv.innerHTML = "";
+
+          const wrap = document.createElement("div");
+          wrap.className = "coord-card";
+          wrap.innerHTML = `<h3 style="color:white">Chip ${page.coord}</h3>`;
+
+          const layersWrap = document.createElement("div");
+          layersWrap.className = "layers-wrap";
+
+          // void 마스크 먼저 추가 (가장 맨 위, 항상 표시)
+          const voidMaskCanvas = this.createVoidMaskCanvas(
+            page.coord,
+            page.type,
+            true
+          ); // 항상 생성
+          const voidItem = document.createElement("div");
+          voidItem.className = "layer-item";
+          voidItem.innerHTML = `<div class="layer-label" style="color: #e74c3c">VOID MASK (ALL LAYERS)</div>`;
+          voidItem.appendChild(voidMaskCanvas);
+          layersWrap.appendChild(voidItem);
+
+          // 기존 레이어들 추가
+          page.layers.forEach((l) => {
+            const item = document.createElement("div");
+            item.className = "layer-item";
+            item.innerHTML = `<div class="layer-label">${l.label}</div>`;
+            item.appendChild(l.canvas);
+            layersWrap.appendChild(item);
+          });
+
+          wrap.appendChild(layersWrap);
+          patchesDiv.appendChild(wrap);
+
+          document.getElementById("pageInfo").textContent = `Page ${
+            this.currentPatchPage + 1
+          } / ${this.allPatchPages.length}`;
+
+          // 현재 패치 변경 시 그리드의 초록점 업데이트
+          await this.drawPage();
+        }
+
+        downloadZip() {
+          if (!window.allPatchCanvases || !window.allPatchCanvases.length) {
+            alert("먼저 Extract Patches를 실행하세요.");
+            return;
+          }
+
+          const zip = new JSZip();
+
+          // 메타데이터 추가
+          const metadata = this.getGridMetadata();
+          zip.file("metadata.json", JSON.stringify(metadata, null, 2));
+
+          // 좌표 정보 추가
+          const coordinateInfo = {
+            coordinates: this.csvRows,
+            chipPoints: this.chipPoints,
+          };
+          zip.file("coordinates.json", JSON.stringify(coordinateInfo, null, 2));
+
+          // README 파일 추가
+          const readmeContent = `# Wafer Patch Extraction Data
+          
+TIFF File: ${metadata.tiffFileName || "Unknown"}
+Extraction Date: ${metadata.timestamp}
+Version: ${metadata.version}
+
+## Grid Settings
+- Columns: ${metadata.gridSettings.cols}
+- Rows: ${metadata.gridSettings.rows}  
+- Cell Width: ${metadata.gridSettings.cellW}px
+- Cell Height: ${metadata.gridSettings.cellH}px
+
+## Alignment
+- Origin: (${metadata.origin.x}, ${metadata.origin.y})
+- Reference Grid: (${metadata.referenceGrid.x}, ${metadata.referenceGrid.y})
+
+## Enhancement Settings
+- Alpha (Contrast): ${metadata.enhanceSettings.alpha}
+- Beta (Brightness): ${metadata.enhanceSettings.beta}
+- Target Mean: ${metadata.enhanceSettings.targetMean}
+- Target Std: ${metadata.enhanceSettings.targetStd}
+- Padding: ${metadata.enhanceSettings.padPx}px
+
+## Extraction Info
+- Total Pages: ${metadata.extractionInfo.totalPages}
+- Total Coordinates: ${metadata.extractionInfo.totalCoordinates}
+- Total Patches: ${metadata.extractionInfo.totalPatches}
+- Patch Size: ${metadata.extractionInfo.patchSize}px
+
+## Structure
+- split/[type]/layer_[XX]/[patch_name].png
+- metadata.json: Grid and extraction settings
+- coordinates.json: Chip coordinate data
+`;
+          zip.file("README.txt", readmeContent);
+
+          // 패치 이미지들 추가
+          window.allPatchCanvases.forEach((p) => {
+            const folderPath = `split/${p.type}/layer_${String(
+              p.layer
+            ).padStart(2, "0")}`;
+            const folder = zip.folder(folderPath);
+            const dataURL = p.canvas.toDataURL("image/png").split(",")[1];
+            folder.file(`${p.label}.png`, dataURL, { base64: true });
+          });
+
+          // merge mask 생성 및 추가 (패치 뷰어에 보이는 그대로)
+          this.addViewerMasksToZip(zip);
+
+          zip.generateAsync({ type: "blob" }).then((content) => {
+            const fileName = this.generateFileName("patches", ".zip");
+            saveAs(content, fileName);
+            console.log(`Downloaded patches ZIP: ${fileName}`);
+            console.log("ZIP contents:", {
+              patches: window.allPatchCanvases.length,
+              metadata: "included",
+              coordinates: this.csvRows.length,
+            });
+          });
+        }
+
+        addViewerMasksToZip(zip) {
+          // 각 칩 좌표별로 현재 뷰어에 보이는 canvas들을 그대로 저장
+          const processedChips = new Set();
+
+          this.allPatchPages.forEach((patchPage) => {
+            const chipCoord = patchPage.coord;
+            const t = patchPage.type;
+            if (processedChips.has(chipCoord)) return;
+            processedChips.add(chipCoord);
+
+            // 칩 좌표 파싱
+            const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+            if (!match) return;
+
+            const chipX = parseInt(match[1]);
+            const chipY = parseInt(match[2]);
+
+            // 해당 칩의 보이드가 있는지 확인
+            let hasVoids = false;
+            for (const [
+              voidKey,
+              voidData,
+            ] of this.voidManager.voids.entries()) {
+              if (voidData.x === chipX && voidData.y === chipY) {
+                hasVoids = true;
+                break;
+              }
+            }
+
+            // 칩 타입 추출 (첫 번째 레이어에서)
+            const firstLayer = patchPage.layers[0];
+            const chipType = firstLayer ? firstLayer.type : "NA";
+
+            // 첫 번째 레이어 canvas를 기반으로 merge mask 생성
+            const sourceCanvas = firstLayer.canvas;
+
+            // merge mask 캔버스 생성 (원본과 같은 크기)
+            const maskCanvas = document.createElement("canvas");
+            maskCanvas.width = sourceCanvas.width;
+            maskCanvas.height = sourceCanvas.height;
+            const maskCtx = maskCanvas.getContext("2d");
+
+            // 타이틀 부분을 merge 레이블로 수정
+            const titleH = 40;
+            const patchSize = 300;
+            const label = `X${padCoord(chipX)}_Y${padCoord(
+              chipY
+            )}_L00_LEG:${t}`;
+            maskCtx.fillStyle = "#000";
+            maskCtx.fillRect(0, 0, patchSize, titleH);
+            maskCtx.fillStyle = "#fff";
+            maskCtx.font = "20px sans-serif";
+            maskCtx.textBaseline = "middle";
+            maskCtx.fillText(label, 6, titleH / 2);
+
+            // 패치 뷰어에서와 동일하게 void들 그리기 (모든 레이어의 void들 실선으로)
+            this.voidManager.drawVoidMask(maskCtx, chipCoord, 0);
+
+            // ZIP에 추가
+            const folderPath = `split/${chipType}/merge`;
+            const folder = zip.folder(folderPath);
+            const dataURL = maskCanvas.toDataURL("image/png").split(",")[1];
+            folder.file(`${label}.png`, dataURL, { base64: true });
+
+            console.log(
+              `Created viewer-based merge mask for chip ${chipCoord} with voids`
+            );
+          });
+        }
+
+        downloadVoids() {
+          const voidData = this.voidManager.exportVoids();
+          if (!voidData.length) {
+            alert("No voids recorded.");
+            return;
+          }
+
+          // 메타데이터와 함께 void 데이터 구성
+          const voidExportData = {
+            metadata: this.getGridMetadata(),
+            voidRecords: voidData,
+            statistics: this.voidManager.getStats(),
+            exportInfo: {
+              totalVoids: voidData.length,
+              exportDate: new Date().toISOString(),
+              syncModeEnabled: this.voidManager.syncMode,
+            },
+          };
+
+          const blob = new Blob([JSON.stringify(voidExportData, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+
+          const fileName = this.generateFileName("voids", ".json");
+          a.download = fileName;
+          a.click();
+          URL.revokeObjectURL(url);
+
+          console.log(`Downloaded void JSON: ${fileName}`);
+          console.log("Void export data:", {
+            voids: voidData.length,
+            metadata: "included",
+            statistics: voidExportData.statistics,
+          });
+        }
+
+        showVoidStats() {
+          const stats = this.voidManager.getStats();
+          alert(`Void Statistics:
+Total Voids: ${stats.totalVoids}
+
+By Type:
+${Object.entries(stats.byType)
+  .map(([type, count]) => `${type}: ${count}`)
+  .join("\n")}
+
+By Layer:
+${Object.entries(stats.byLayer)
+  .map(([layer, count]) => `Layer ${layer}: ${count}`)
+  .join("\n")}
+
+Check console for detailed info.`);
+          console.log("Detailed void statistics:", stats);
+        }
+
+        debugCheck() {
+          console.log("=== WAFER APP V2 DEBUG ===");
+          console.log("Pages loaded:", this.pages.length);
+          console.log("CSV rows:", this.csvRows.length);
+          console.log("Patch pages:", this.allPatchPages.length);
+
+          this.voidManager.debug();
+
+          alert(`Debug Info:
+Pages: ${this.pages.length}
+CSV Rows: ${this.csvRows.length}
+Void Records: ${this.voidManager.voids.size}
+Check console for details.`);
+        }
+
+        /**
+         * 패치 정렬 프리뷰 업데이트
+         */
+        updateGridPreview() {
+          const canvas = this.gridPreviewCanvas;
+          const ctx = this.gridPreviewCtx;
+          const statusDiv = document.getElementById("previewStatus");
+
+          // 캔버스 초기화
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#f8f8f8";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // 이미지가 로드되지 않은 경우
+          if (!this.pages.length) {
+            ctx.fillStyle = "#999";
+            ctx.font = "14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(
+              "Load TIFF file to see patch samples",
+              canvas.width / 2,
+              canvas.height / 2
+            );
+            statusDiv.textContent = "Load TIFF to see patch samples";
+            return;
+          }
+
+          // 현재 페이지 이미지 가져오기
+          const currentPage = this.pages[this.pageIndex] || this.pages[0];
+
+          // 그리드 파라미터
+          const cellW = +document.getElementById("cellW").value || 100;
+          const cellH = +document.getElementById("cellH").value || 100;
+
+          // 샘플 좌표 결정
+          const sampleCoords = this.getSampleCoordsForPreview();
+
+          if (sampleCoords.length === 0) {
+            // 본딩 좌표가 없으면 기본 샘플 위치 사용
+            sampleCoords.push(
+              { x: 0, y: 0, label: "Center sample" },
+              { x: 2, y: 1, label: "Sample 2" },
+              { x: -1, y: -1, label: "Sample 3" }
+            );
+          }
+
+          // 샘플 패치들을 프리뷰에 그리기
+          this.drawPatchSamples(ctx, currentPage, sampleCoords, cellW, cellH);
+
+          // 상태 텍스트 업데이트
+          statusDiv.textContent = `Showing ${sampleCoords.length} patch samples (Cell: ${cellW}×${cellH})`;
+        }
+
+        /**
+         * 프리뷰용 샘플 좌표 가져오기
+         */
+        getSampleCoordsForPreview() {
+          if (this.csvRows.length === 0) return [];
+
+          const samples = [];
+          const maxSamples = 4; // 프리뷰에서 보여줄 최대 샘플 수
+
+          if (this.csvRows.length <= maxSamples) {
+            // 전체 좌표가 적으면 모두 표시
+            return this.csvRows.map((coord, i) => ({
+              ...coord,
+              label: `(${coord.x},${coord.y})`,
+            }));
+          }
+
+          // 균등하게 분산된 샘플 선택
+          const step = Math.floor(this.csvRows.length / maxSamples);
+          for (let i = 0; i < maxSamples; i++) {
+            const coord = this.csvRows[i * step];
+            samples.push({
+              ...coord,
+              label: `(${coord.x},${coord.y})`,
+            });
+          }
+
+          return samples;
+        }
+
+        /**
+         * 패치 샘플들을 프리뷰 캔버스에 그리기
+         */
+        drawPatchSamples(ctx, sourcePage, sampleCoords, cellW, cellH) {
+          const canvas = ctx.canvas;
+          const padding = 5;
+          const cols = 2; // 2열로 배치
+          const rows = Math.ceil(sampleCoords.length / cols);
+
+          const availableWidth = canvas.width - padding * 2;
+          const availableHeight = canvas.height - padding * 2 - 20; // 텍스트 공간
+
+          const patchW = Math.floor(availableWidth / cols) - padding;
+          const patchH = Math.floor(availableHeight / rows) - padding;
+
+          // 패치 크기를 정사각형으로 맞추기
+          const patchSize = Math.min(patchW, patchH);
+
+          sampleCoords.forEach((coord, index) => {
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+
+            const drawX = padding + col * (patchSize + padding);
+            const drawY = padding + row * (patchSize + padding) + 15; // 텍스트 공간
+
+            // 원본 이미지에서 패치 영역 계산
+            const sourceX = this.origin.x + (coord.x - this.refGrid.x) * cellW;
+            const sourceY = this.origin.y + (coord.y - this.refGrid.y) * cellH;
+
+            console.log(sourceX, sourceY, cellW, cellH);
+
+            // 패치 그리기
+            try {
+              ctx.drawImage(
+                sourcePage,
+                sourceX,
+                sourceY,
+                cellW,
+                cellH,
+                drawX,
+                drawY,
+                patchSize,
+                patchSize
+              );
+
+              // 패치 경계선
+              ctx.strokeStyle = "#333";
+              ctx.lineWidth = 1;
+              ctx.strokeRect(drawX, drawY, patchSize, patchSize);
+
+              // 좌표 라벨
+              ctx.fillStyle = "#000";
+              ctx.font = "10px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText(coord.label, drawX + patchSize / 2, drawY - 3);
+            } catch (error) {
+              // 이미지 영역이 범위를 벗어난 경우
+              ctx.fillStyle = "#ffeeee";
+              ctx.fillRect(drawX, drawY, patchSize, patchSize);
+              ctx.strokeStyle = "#ff0000";
+              ctx.lineWidth = 1;
+              ctx.strokeRect(drawX, drawY, patchSize, patchSize);
+
+              ctx.fillStyle = "#ff0000";
+              ctx.font = "9px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText(
+                "Out of",
+                drawX + patchSize / 2,
+                drawY + patchSize / 2 - 5
+              );
+              ctx.fillText(
+                "bounds",
+                drawX + patchSize / 2,
+                drawY + patchSize / 2 + 5
+              );
+
+              ctx.fillStyle = "#000";
+              ctx.font = "10px sans-serif";
+              ctx.fillText(coord.label, drawX + patchSize / 2, drawY - 3);
+            }
+
+            // 각 패치에 빨간점 표시 (기준점이 이 패치의 어느 위치인지)
+            this.drawRedPointOnPatch(
+              ctx,
+              coord,
+              drawX,
+              drawY,
+              patchSize,
+              cellW,
+              cellH
+            );
+          });
+        }
+
+        /**
+         * 실시간 void 마스크 캔버스 생성
+         */
+        createVoidMaskCanvas(chipCoord, type, forceCreate = false) {
+          const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+          if (!match) return null;
+
+          const chipX = parseInt(match[1], 10);
+          const chipY = parseInt(match[2], 10);
+          const cellW = +document.getElementById("cellW").value;
+          const cellH = +document.getElementById("cellH").value;
+
+          // 해당 칩에 void가 있는지 확인
+          const chipVoids = [];
+          for (const [voidKey, voidData] of this.voidManager.voids.entries()) {
+            if (voidData.x === chipX && voidData.y === chipY) {
+              chipVoids.push(voidData);
+            }
+          }
+
+          // forceCreate가 false이고 void가 없으면 null 반환 (이전 동작)
+          if (!forceCreate && chipVoids.length === 0) {
+            return null;
+          }
+
+          // 투명 마스크 캔버스 생성 (void가 없어도 빈 캔버스 생성)
+          const patchSize = 300;
+          const titleH = 40;
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = patchSize;
+          maskCanvas.height = (patchSize * cellH) / cellW + titleH;
+          const maskCtx = maskCanvas.getContext("2d");
+
+          // 배경을 투명하게 설정
+          maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+          // 타이틀 영역 (검은 배경)
+          const label = `X${padCoord(chipX)}_Y${padCoord(
+            chipY
+          )}_L00_LEG:${type}`;
+          maskCtx.fillStyle = "#000";
+          maskCtx.fillRect(0, 0, patchSize, titleH);
+          maskCtx.fillStyle = "#fff";
+          maskCtx.font = "20px sans-serif";
+          maskCtx.textBaseline = "middle";
+          maskCtx.fillText(label, 6, titleH / 2);
+
+          // void 마스크 그리기 (void가 있는 경우에만)
+          if (chipVoids.length > 0) {
+            this.voidManager.drawVoidMask(maskCtx, chipCoord, 0);
+          }
+          // void가 없으면 타이틀만 있는 빈 캔버스
+
+          return maskCanvas;
+        }
+
+        /**
+         * 메타데이터에서 설정 정보 적용
+         */
+        applyMetadata(metadata) {
+          try {
+            // 그리드 설정 적용
+            if (metadata.gridSettings) {
+              document.getElementById("cols").value =
+                metadata.gridSettings.cols || 8;
+              document.getElementById("rows").value =
+                metadata.gridSettings.rows || 8;
+              document.getElementById("cellW").value =
+                metadata.gridSettings.cellW || 100;
+              document.getElementById("cellH").value =
+                metadata.gridSettings.cellH || 100;
+            }
+
+            // Origin과 참조 그리드 적용
+            if (metadata.origin) {
+              this.origin = { ...metadata.origin };
+            }
+            if (metadata.referenceGrid) {
+              this.refGrid = { ...metadata.referenceGrid };
+              document.getElementById("refX").value =
+                metadata.referenceGrid.x || 0;
+              document.getElementById("refY").value =
+                metadata.referenceGrid.y || 0;
+            }
+
+            // 향상 설정 적용
+            if (metadata.enhanceSettings) {
+              const settings = metadata.enhanceSettings;
+              document.getElementById("alpha").value = settings.alpha || 1.2;
+              document.getElementById("beta").value = settings.beta || 10;
+              document.getElementById("targetMean").value =
+                settings.targetMean || 0.5;
+              document.getElementById("targetStd").value =
+                settings.targetStd || 0.2;
+              document.getElementById("padPx").value = settings.padPx || 10;
+            }
+
+            // TIFF 파일명 설정 (있는 경우)
+            if (metadata.tiffFileName) {
+              this.currentTiffFileName = metadata.tiffFileName;
+              document.getElementById(
+                "localTiffPath"
+              ).value = `/${metadata.tiffFileName}.tif`;
+            }
+
+            return true;
+          } catch (error) {
+            console.error("Error applying metadata:", error);
+            return false;
+          }
+        }
+
+        /**
+         * JSON 파일에서 메타데이터 추출
+         */
+        extractMetadataFromJson(jsonData) {
+          // 직접 metadata 객체인 경우
+          if (jsonData.gridSettings && jsonData.origin) {
+            return jsonData;
+          }
+
+          // void JSON 파일인 경우 (metadata 필드 안에 있음)
+          if (jsonData.metadata) {
+            return jsonData.metadata;
+          }
+
+          // 다른 구조일 수 있으므로 null 반환
+          return null;
+        }
+
+        /**
+         * 현재 그리드 설정 정보 수집
+         */
+        getGridMetadata() {
+          return {
+            tiffFileName: this.currentTiffFileName,
+            gridSettings: {
+              cols: +document.getElementById("cols").value,
+              rows: +document.getElementById("rows").value,
+              cellW: +document.getElementById("cellW").value,
+              cellH: +document.getElementById("cellH").value,
+            },
+            origin: { ...this.origin },
+            referenceGrid: { ...this.refGrid },
+            enhanceSettings: {
+              alpha: parseFloat(document.getElementById("alpha").value),
+              beta: parseFloat(document.getElementById("beta").value),
+              targetMean: parseFloat(
+                document.getElementById("targetMean").value
+              ),
+              targetStd: parseFloat(document.getElementById("targetStd").value),
+              padPx: parseInt(document.getElementById("padPx").value, 10),
+            },
+            extractionInfo: {
+              totalPages: this.pages.length,
+              totalCoordinates: this.csvRows.length,
+              totalPatches: this.allPatchPages.length * this.pages.length,
+              patchSize: 300, // 고정 패치 크기
+            },
+            timestamp: new Date().toISOString(),
+            version: "v2",
+          };
+        }
+
+        /**
+         * 타임스탬프를 포함한 파일명 생성
+         */
+        generateFileName(suffix = "", extension = "") {
+          const now = new Date();
+          const timestamp =
+            now.getFullYear() +
+            String(now.getMonth() + 1).padStart(2, "0") +
+            String(now.getDate()).padStart(2, "0") +
+            "_" +
+            String(now.getHours()).padStart(2, "0") +
+            String(now.getMinutes()).padStart(2, "0") +
+            String(now.getSeconds()).padStart(2, "0");
+
+          const baseName = this.currentTiffFileName || "wafer_data";
+          return `${baseName}_${suffix}_${timestamp}${extension}`;
+        }
+
+        /**
+         * void JSON 동기화 설정
+         */
+        setupVoidJsonSync() {
+          const voidJsonTextarea = document.getElementById("voidJson");
+
+          // textarea 변경 시 void 데이터 업데이트
+          voidJsonTextarea.addEventListener("input", () => {
+            try {
+              const jsonData = JSON.parse(voidJsonTextarea.value);
+              this.loadVoidDataFromJson(jsonData);
+              this.refreshCurrentPatches();
+            } catch (error) {
+              // JSON 파싱 오류 시 무시 (사용자가 타이핑 중일 수 있음)
+            }
+          });
+
+          // 초기 표시
+          this.updateVoidJsonDisplay();
+        }
+
+        /**
+         * void 데이터를 JSON으로 표시 업데이트
+         */
+        updateVoidJsonDisplay() {
+          const voidJsonTextarea = document.getElementById("voidJson");
+          const voidData = this.voidManager.exportVoids();
+          voidJsonTextarea.value = JSON.stringify(voidData, null, 2);
+        }
+
+        /**
+         * JSON 데이터에서 void 데이터 로드
+         */
+        loadVoidDataFromJson(jsonData) {
+          // 기존 void 데이터 클리어
+          this.voidManager.voids.clear();
+          this.voidManager.voidIndexCounters.clear();
+
+          // JSON 데이터에서 void 복원
+          jsonData.forEach((voidItem) => {
+            const voidKey = voidItem.key;
+            delete voidItem.key; // key는 별도로 처리
+            this.voidManager.voids.set(voidKey, voidItem);
+
+            // 인덱스 카운터도 업데이트
+            const locationKey = this.voidManager.createLocationKey(
+              voidItem.x,
+              voidItem.y,
+              voidItem.layer
+            );
+            const currentMax =
+              this.voidManager.voidIndexCounters.get(locationKey) || 0;
+            this.voidManager.voidIndexCounters.set(
+              locationKey,
+              Math.max(currentMax, voidItem.voidIndex + 1)
+            );
+          });
+        }
+
+        /**
+         * 패치에 빨간점(기준점) 표시
+         */
+        drawRedPointOnPatch(
+          ctx,
+          coord,
+          patchX,
+          patchY,
+          patchSize,
+          cellW,
+          cellH
+        ) {
+          // 기준점이 이 패치 내에 있는지 확인
+          const refRelativeX = this.refGrid.x - coord.x; // 기준점의 상대적 X 위치
+          const refRelativeY = this.refGrid.y - coord.y; // 기준점의 상대적 Y 위치
+
+          // 패치 내부 좌표로 변환 (0~1 범위)
+          const refNormalizedX = refRelativeX + 0.5; // 패치 중심이 0.5
+          const refNormalizedY = refRelativeY + 0.5;
+
+          // 패치 내부에 있는 경우에만 빨간점 표시
+          if (
+            refNormalizedX >= 0 &&
+            refNormalizedX <= 1 &&
+            refNormalizedY >= 0 &&
+            refNormalizedY <= 1
+          ) {
+            const redPointX = patchX + refNormalizedX * patchSize;
+            const redPointY = patchY + refNormalizedY * patchSize;
+
+            ctx.fillStyle = "red";
+            ctx.beginPath();
+            ctx.arc(redPointX, redPointY, 4, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // 빨간점 주위에 흰색 테두리 추가 (가독성 향상)
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+      }
+
+      // 앱 초기화
+      const app = new WaferAppV2();
+      window.waferApp = app;
+    </script>
+  </body>
+</html>

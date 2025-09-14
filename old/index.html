@@ -137,7 +137,32 @@
       #voidControls {
         padding: 10px;
         display: flex;
-        gap: 8px;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      
+      #voidControls button {
+        padding: 6px 12px;
+        border: 1px solid #555;
+        background: #333;
+        color: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      #voidControls button:hover {
+        background: #444;
+        border-color: #666;
+      }
+      
+      #voidControls select {
+        padding: 6px;
+        background: #333;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 4px;
       }
     </style>
   </head>
@@ -186,6 +211,7 @@
 
       <button id="extractBtn">Extract Patches</button>
       <button id="downloadZipBtn">Download All Patches (ZIP)</button>
+      <button id="debugBtn">Debug Check</button>
     </div>
 
     <div id="center">
@@ -203,6 +229,8 @@
             <option value="crack">crack</option>
             <option value="particle">particle</option>
           </select>
+          <button id="toggleSyncMode">Sync Layers</button>
+          <button id="mergeVoids">Merge All</button>
           <button id="downloadVoids">Download Voids JSON</button>
         </div>
         <div id="patchNav" style="margin-bottom: 10px; text-align: center">
@@ -230,10 +258,14 @@
       let currentScale = 1;
       let chipPoints = []; // 🔵 파란점 좌표 저장
       let voidMarkMode = false;
-      let voidRecords = []; // [{patchLabel, type, centerX, centerY, radiusX, radiusY}]
+      let voidRecords = []; // [{patchLabel, chipCoord, layer, type, centerX, centerY, radiusX, radiusY, id}]
       let deleteVoidMode = false;
       let selectedVoid = null;
       let resizeMode = false;
+      let voidSyncMode = true; // 레이어 간 보이드 동기화 모드
+      let voidIdCounter = 0;
+      let syncThrottleTimer = null; // 동기화 throttling용 타이머
+      let voidGroupCounter = 0; // 보이드 그룹 ID 카운터
 
       const markBtn = document.getElementById("toggleVoidMode");
       const deleteBtn = document.getElementById("toggleDeleteMode");
@@ -246,6 +278,41 @@
       document.getElementById("toggleDeleteMode").onclick = () => {
         deleteVoidMode = !deleteVoidMode;
         deleteBtn.classList.toggle("mode-on", deleteVoidMode);
+      };
+
+      // 레이어 동기화 모드 토글
+      const syncBtn = document.getElementById("toggleSyncMode");
+      syncBtn.classList.toggle("mode-on", voidSyncMode);
+      document.getElementById("toggleSyncMode").onclick = () => {
+        voidSyncMode = !voidSyncMode;
+        syncBtn.classList.toggle("mode-on", voidSyncMode);
+        // 현재 보이는 패치들을 다시 그리기
+        refreshCurrentPatches();
+      };
+
+      // 칩별 보이드 머지
+      document.getElementById("mergeVoids").onclick = () => {
+        mergeChipVoids();
+        alert("All chip voids have been merged across layers!");
+        refreshCurrentPatches();
+      };
+
+      // 디버그 체크 버튼
+      document.getElementById("debugBtn").onclick = () => {
+        console.log("=== DEBUG CHECK ===");
+        console.log("Pages loaded:", pages.length);
+        console.log("CSV rows:", csvRows.length);
+        console.log("CSV data sample:", csvRows.slice(0, 5));
+        console.log("Chip points:", chipPoints.slice(0, 5));
+        console.log("Reference grid:", refGrid);
+        console.log("Current scale:", currentScale);
+        console.log("Origin:", origin);
+        
+        alert(`Debug Info:
+Pages: ${pages.length}
+CSV Rows: ${csvRows.length}
+Chip Points: ${chipPoints.length}
+Check console for details.`);
       };
       // === UI 엘리먼트 ===
       const tiffInput = document.getElementById("tiffFile");
@@ -265,10 +332,14 @@
 
       // ===== TIFF 로드 =====
       async function loadTiff(file) {
-        const buf = await file.arrayBuffer();
-        const ifds = UTIF.decode(buf);
-        ifds.forEach((ifd) => UTIF.decodeImage(buf, ifd));
-        pages = ifds.map((ifd) => {
+        console.log("Loading TIFF file:", file.name);
+        try {
+          const buf = await file.arrayBuffer();
+          console.log("TIFF buffer size:", buf.byteLength);
+          const ifds = UTIF.decode(buf);
+          console.log("TIFF pages found:", ifds.length);
+          ifds.forEach((ifd) => UTIF.decodeImage(buf, ifd));
+          pages = ifds.map((ifd) => {
           const rgba = UTIF.toRGBA8(ifd);
           const c = document.createElement("canvas");
           c.width = ifd.width;
@@ -286,7 +357,12 @@
           .map((_, i) => `<option value=\"${i}\">Page ${i + 1}</option>`)
           .join("");
         pageIndex = 0;
+        console.log("TIFF loaded successfully, pages:", pages.length);
         drawPage();
+        } catch (error) {
+          console.error("TIFF loading failed:", error);
+          alert("TIFF 파일 로드 실패: " + error.message);
+        }
       }
 
       function drawPage() {
@@ -313,8 +389,16 @@
       });
 
       function parseBondingMap(text) {
+        console.log("Parsing bonding map, text length:", text.length);
+        console.log("Text preview:", text.substring(0, 200));
+        
         const lines = text.trimEnd().split(/\r?\n/);
-        if (lines.length < 2) return [];
+        console.log("Lines found:", lines.length);
+        
+        if (lines.length < 2) {
+          console.log("Not enough lines for bonding map");
+          return [];
+        }
 
         // 첫 행: X 헤더 (빈 문자열도 유지)
         const xHeaders = lines[0]
@@ -322,6 +406,7 @@
           .slice(1)
           .map((h) => h.trim())
           .map((h) => parseInt(h, 10));
+        console.log("X headers:", xHeaders);
 
         const out = [];
         for (let r = 1; r < lines.length; r++) {
@@ -340,7 +425,8 @@
             if (!isNaN(x)) out.push({ x, y, type: val });
           }
         }
-        console.log(out);
+        console.log("Parsed bonding map result:", out);
+        console.log("Total coordinates found:", out.length);
         return out;
       }
 
@@ -520,14 +606,30 @@
 
             const type =
               document.getElementById("voidTypeSelect").value || "void";
-            voidRecords.push({
+            
+            // 패치 라벨에서 칩 좌표와 레이어 정보 추출
+            const { chipCoord, layer } = parsePatchLabel(patchLabel);
+            
+            const groupId = ++voidGroupCounter;
+            const newVoid = {
+              id: ++voidIdCounter,
+              groupId: groupId,
               patchLabel,
+              chipCoord,
+              layer,
               type,
               centerX,
               centerY,
               radiusX,
               radiusY,
-            });
+            };
+            
+            voidRecords.push(newVoid);
+
+            // 동기화 모드가 켜져있으면 같은 칩의 다른 레이어에도 보이드 표시
+            if (voidSyncMode) {
+              syncVoidToAllLayers(newVoid);
+            }
 
             ctx.putImageData(imageData, 0, 0);
             drawAllVoids(ctx, patchLabel);
@@ -564,6 +666,11 @@
           if (removed) {
             ctx.putImageData(imageData, 0, 0); // 원본 복원
             drawAllVoids(ctx, patchLabel); // 남은 보이드 다시 그리기
+            
+            // 동기화 모드일 때 다른 레이어들도 새로고침
+            if (voidSyncMode) {
+              refreshCurrentPatches();
+            }
           }
         });
 
@@ -636,11 +743,21 @@
 
             ctx.putImageData(imageData, 0, 0);
             drawAllVoids(ctx, patchLabel);
+            
+            // 실시간 동기화 (throttled)
+            throttledSyncRefresh();
           };
 
           const upHandler = () => {
             document.removeEventListener("mousemove", moveHandler);
             document.removeEventListener("mouseup", upHandler);
+            
+            // void 이동/크기 조절 완료 후 다른 레이어의 동일한 보이드 업데이트
+            if (voidSyncMode && selectedVoid) {
+              updateSyncedVoids(selectedVoid);
+              refreshCurrentPatches();
+            }
+            
             selectedVoid = null;
           };
 
@@ -652,12 +769,18 @@
       // 특정 패치에 저장된 모든 보이드 다시 그리기
       function drawAllVoids(ctx, patchLabel) {
         ctx.lineWidth = 2;
+        
+        // 현재 패치의 칩 좌표 및 레이어 정보 추출
+        const { chipCoord, layer } = parsePatchLabel(patchLabel);
+        
+        // 현재 레이어의 보이드 (실선)
         voidRecords
           .filter((v) => v.patchLabel === patchLabel)
           .forEach((v) => {
             ctx.beginPath();
             const color = voidColors[v.type] || voidColors.default;
             ctx.strokeStyle = color;
+            ctx.setLineDash([]); // 실선
             ctx.ellipse(
               v.centerX,
               v.centerY,
@@ -669,6 +792,268 @@
             );
             ctx.stroke();
           });
+
+        // 동기화 모드일 때 다른 레이어의 보이드 (점선)
+        if (voidSyncMode) {
+          const otherLayerVoids = voidRecords.filter((v) => v.chipCoord === chipCoord && v.layer !== layer);
+          
+          otherLayerVoids.forEach((v) => {
+              ctx.beginPath();
+              const color = voidColors[v.type] || voidColors.default;
+              ctx.strokeStyle = color;
+              ctx.globalAlpha = 0.5; // 반투명
+              ctx.setLineDash([5, 5]); // 점선
+              ctx.ellipse(
+                v.centerX,
+                v.centerY,
+                v.radiusX,
+                v.radiusY,
+                0,
+                0,
+                2 * Math.PI
+              );
+              ctx.stroke();
+              ctx.globalAlpha = 1.0; // 투명도 복원
+              ctx.setLineDash([]); // 선 스타일 복원
+            });
+        }
+      }
+
+      // 패치 라벨에서 칩 좌표와 레이어 추출
+      function parsePatchLabel(patchLabel) {
+        // 예: "XN05_Y07_L03_LEG:good" -> chipCoord: "(-5,7)", layer: 3
+        // 예: "X05_YN07_L03_LEG:good" -> chipCoord: "(5,-7)", layer: 3
+        const match = patchLabel.match(/X(N?)(\d+)_Y(N?)(\d+)_L(\d+)/);
+        if (match) {
+          const xNegative = match[1] === 'N';
+          const xValue = parseInt(match[2], 10);
+          const yNegative = match[3] === 'N';
+          const yValue = parseInt(match[4], 10);
+          const layer = parseInt(match[5], 10);
+          
+          const actualX = xNegative ? -xValue : xValue;
+          const actualY = yNegative ? -yValue : yValue;
+          
+          return { 
+            chipCoord: `(${actualX},${actualY})`, 
+            layer: layer 
+          };
+        }
+        return { chipCoord: "unknown", layer: 1 };
+      }
+
+      // 같은 칩의 모든 레이어에 보이드 동기화
+      function syncVoidToAllLayers(newVoid) {
+        if (!newVoid || !voidSyncMode) return;
+        
+        // 현재 보이는 칩의 모든 레이어에 동일한 보이드 생성
+        if (allPatchPages.length > 0 && currentPatchPage < allPatchPages.length) {
+          const currentPage = allPatchPages[currentPatchPage];
+          const currentChipCoord = currentPage.coord;
+          
+          // 같은 칩의 다른 레이어들에 보이드 추가
+          currentPage.layers.forEach(layerInfo => {
+            if (layerInfo.label === newVoid.patchLabel) return; // 원본 레이어는 제외
+            
+            // 이미 같은 그룹의 보이드가 있는지 확인
+            const existingVoid = voidRecords.find(v => 
+              v.patchLabel === layerInfo.label && 
+              v.groupId === newVoid.groupId
+            );
+            
+            if (!existingVoid) {
+              // 새로운 연결된 보이드 생성
+              const { chipCoord, layer } = parsePatchLabel(layerInfo.label);
+              const syncedVoid = {
+                id: ++voidIdCounter,
+                groupId: newVoid.groupId, // 같은 그룹 ID 사용
+                patchLabel: layerInfo.label,
+                chipCoord: chipCoord,
+                layer: layer,
+                type: newVoid.type,
+                centerX: newVoid.centerX,
+                centerY: newVoid.centerY,
+                radiusX: newVoid.radiusX,
+                radiusY: newVoid.radiusY,
+              };
+              
+              voidRecords.push(syncedVoid);
+            }
+          });
+        }
+        
+        // 현재 페이지의 모든 패치들을 새로고침
+        refreshCurrentPatches();
+      }
+
+      // 현재 보이는 패치들을 다시 그리기
+      function refreshCurrentPatches() {
+        if (!allPatchPages.length || currentPatchPage >= allPatchPages.length) return;
+        
+        const currentPage = allPatchPages[currentPatchPage];
+        currentPage.layers.forEach(layerInfo => {
+          const ctx = layerInfo.canvas.getContext('2d');
+          ctx.putImageData(layerInfo.imageData, 0, 0);
+          drawAllVoids(ctx, layerInfo.label);
+        });
+      }
+
+      // 동기화를 throttling하여 성능 최적화
+      function throttledSyncRefresh() {
+        if (!voidSyncMode) return;
+        
+        if (syncThrottleTimer) {
+          clearTimeout(syncThrottleTimer);
+        }
+        
+        syncThrottleTimer = setTimeout(() => {
+          refreshCurrentPatches();
+          syncThrottleTimer = null;
+        }, 100); // 100ms throttling
+      }
+
+      // 이동/크기 조절된 void를 같은 그룹의 다른 레이어 보이드들과 동기화
+      function updateSyncedVoids(movedVoid) {
+        if (!movedVoid || !voidSyncMode) return;
+        
+        // 같은 그룹 ID를 가진 모든 보이드들을 업데이트
+        if (movedVoid.groupId) {
+          voidRecords.forEach(v => {
+            if (v.id === movedVoid.id) return; // 자기 자신은 제외
+            if (v.groupId === movedVoid.groupId) {
+              // 같은 그룹의 보이드들은 위치와 크기 동기화
+              v.centerX = movedVoid.centerX;
+              v.centerY = movedVoid.centerY;
+              v.radiusX = movedVoid.radiusX;
+              v.radiusY = movedVoid.radiusY;
+            }
+          });
+        } else {
+          // groupId가 없는 경우 기존 방식 사용 (거리 기반)
+          const { chipCoord } = parsePatchLabel(movedVoid.patchLabel);
+          
+          voidRecords.forEach(v => {
+            if (v.id === movedVoid.id) return;
+            if (v.chipCoord !== chipCoord) return;
+            if (v.type !== movedVoid.type) return;
+            
+            const distanceThreshold = 30;
+            const originalDistance = Math.sqrt(
+              Math.pow(v.centerX - movedVoid.centerX, 2) + 
+              Math.pow(v.centerY - movedVoid.centerY, 2)
+            );
+            
+            if (originalDistance < distanceThreshold) {
+              v.centerX = movedVoid.centerX;
+              v.centerY = movedVoid.centerY;
+              v.radiusX = movedVoid.radiusX;
+              v.radiusY = movedVoid.radiusY;
+            }
+          });
+        }
+      }
+
+      // 칩별 보이드 머지 (모든 레이어의 보이드를 각 레이어에 복사)
+      function mergeChipVoids() {
+        // 칩별로 그룹핑
+        const voidsByChip = {};
+        voidRecords.forEach(v => {
+          if (!voidsByChip[v.chipCoord]) {
+            voidsByChip[v.chipCoord] = [];
+          }
+          voidsByChip[v.chipCoord].push(v);
+        });
+
+        // 각 칩에 대해 모든 레이어에 모든 보이드 복사
+        Object.keys(voidsByChip).forEach(chipCoord => {
+          const chipVoids = voidsByChip[chipCoord];
+          const uniqueVoids = removeDuplicateVoids(chipVoids);
+          
+          // 해당 칩의 모든 레이어에 보이드 추가
+          const chipLayers = getChipLayers(chipCoord);
+          chipLayers.forEach(layer => {
+            uniqueVoids.forEach(originalVoid => {
+              const existingVoid = voidRecords.find(v => 
+                v.chipCoord === chipCoord && 
+                v.layer === layer &&
+                Math.abs(v.centerX - originalVoid.centerX) < 5 &&
+                Math.abs(v.centerY - originalVoid.centerY) < 5 &&
+                v.type === originalVoid.type
+              );
+              
+              if (!existingVoid) {
+                const newPatchLabel = generatePatchLabel(chipCoord, layer);
+                voidRecords.push({
+                  id: ++voidIdCounter,
+                  patchLabel: newPatchLabel,
+                  chipCoord: chipCoord,
+                  layer: layer,
+                  type: originalVoid.type,
+                  centerX: originalVoid.centerX,
+                  centerY: originalVoid.centerY,
+                  radiusX: originalVoid.radiusX,
+                  radiusY: originalVoid.radiusY,
+                });
+              }
+            });
+          });
+        });
+      }
+
+      // 중복 보이드 제거
+      function removeDuplicateVoids(voids) {
+        const unique = [];
+        const tolerance = 10; // 픽셀 허용 오차
+        
+        voids.forEach(v => {
+          const isDuplicate = unique.some(u => 
+            Math.abs(u.centerX - v.centerX) < tolerance &&
+            Math.abs(u.centerY - v.centerY) < tolerance &&
+            u.type === v.type
+          );
+          
+          if (!isDuplicate) {
+            unique.push(v);
+          }
+        });
+        
+        return unique;
+      }
+
+      // 특정 칩의 모든 레이어 번호 가져오기
+      function getChipLayers(chipCoord) {
+        const layers = new Set();
+        voidRecords.forEach(v => {
+          if (v.chipCoord === chipCoord) {
+            layers.add(v.layer);
+          }
+        });
+        
+        // 기본적으로 모든 페이지 레이어 포함
+        for (let i = 1; i <= pages.length; i++) {
+          layers.add(i);
+        }
+        
+        return Array.from(layers);
+      }
+
+      // 패치 라벨 생성
+      function generatePatchLabel(chipCoord, layer) {
+        const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+        if (match) {
+          const x = parseInt(match[1], 10);
+          const y = parseInt(match[2], 10);
+          
+          const padCoord = (coord) => {
+            if (coord < 0) {
+              return `N${String(Math.abs(coord)).padStart(2, "0")}`;
+            }
+            return `${String(coord).padStart(2, "0")}`;
+          };
+          
+          return `X${padCoord(x)}_Y${padCoord(y)}_L${String(layer).padStart(2, '0')}_LEG:merged`;
+        }
+        return `merged_${chipCoord}_L${layer}`;
       }
 
       // === 이벤트 ===
@@ -767,7 +1152,19 @@
 
       // 기존 extractBtn.onclick 교체
       extractBtn.onclick = () => {
-        if (!pages.length || !csvRows.length) return;
+        console.log("Extract button clicked!");
+        console.log("Pages loaded:", pages.length);
+        console.log("CSV rows loaded:", csvRows.length);
+        console.log("CSV data:", csvRows);
+        
+        if (!pages.length) {
+          alert("TIFF 파일을 먼저 로드해주세요!");
+          return;
+        }
+        if (!csvRows.length) {
+          alert("CSV 데이터를 먼저 로드해주세요!");
+          return;
+        }
 
         allPatchPages = [];
         const cellW = +cellWInput.value;
@@ -791,9 +1188,15 @@
             const ctx = c.getContext("2d");
 
             // 타이틀
-            const label = `X${String(r.x).padStart(2, "0")}_Y${String(
-              r.y
-            ).padStart(2, "0")}_L${String(pageIdx + 1).padStart(2, "0")}_LEG:${
+            // 음수 좌표 처리를 위한 패딩 함수
+            const padCoord = (coord) => {
+              if (coord < 0) {
+                return `N${String(Math.abs(coord)).padStart(2, "0")}`;
+              }
+              return `${String(coord).padStart(2, "0")}`;
+            };
+            
+            const label = `X${padCoord(r.x)}_Y${padCoord(r.y)}_L${String(pageIdx + 1).padStart(2, "0")}_LEG:${
               r.type || "NA"
             }`;
             ctx.fillStyle = "#000";

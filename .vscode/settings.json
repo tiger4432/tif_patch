@@ -1,0 +1,36 @@
+{
+  // Claude Code 최적화 설정
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  
+  // 한글 입력 문제 해결
+  "terminal.integrated.shellArgs.windows": ["-NoExit", "-Command", "chcp 65001"],
+  "terminal.integrated.fontFamily": "D2Coding, 'Courier New', monospace",
+  "terminal.integrated.localEchoEnabled": "off",
+  
+  // 파일 연관성
+  "files.associations": {
+    "*.html": "html",
+    "*.css": "css",
+    "*.js": "javascript"
+  },
+  
+  // 라이브 서버 설정 (Live Server 확장 사용시)
+  "liveServer.settings.root": "/",
+  "liveServer.settings.port": 5500,
+  
+  // 자동 포맷팅
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": true
+  },
+  
+  // HTML/CSS/JS 인덴테이션
+  "html.format.indentInnerHtml": true,
+  "css.format.enable": true,
+  "javascript.format.enable": true,
+  
+  // Git 설정
+  "git.autofetch": true,
+  "git.confirmSync": false
+}

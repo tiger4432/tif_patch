@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(timeout:*)",
+      "Bash(pip install:*)",
+      "Bash(dir:*)",
+      "Bash(start http://localhost:8080/index_v2.html)",
+      "Bash(curl:*)",
+      "Bash(start http://localhost:8080/test_streaming.html)",
+      "Bash(start http://localhost:8080/test_multiple.html)",
+      "Bash(start http://localhost:8080/debug_streaming.html)",
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(cmd /c:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
