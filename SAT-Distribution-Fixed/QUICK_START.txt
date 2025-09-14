@@ -1,0 +1,33 @@
+# SAT (Semiconductor Analysis Tool) - 실행 가이드
+
+## 빠른 시작
+
+1. **SAT-App.exe** 파일을 더블클릭하여 실행
+2. 자동으로 브라우저가 열리고 애플리케이션이 시작됩니다
+3. 사용이 끝나면 콘솔 창에서 Ctrl+C를 눌러 종료
+
+## 주의사항
+
+- 이 폴더의 모든 파일이 필요합니다
+- 바이러스 백신이 실행을 차단할 수 있습니다 (허용해주세요)
+- Windows Defender에서 경고가 나올 수 있습니다 (실행 허용)
+
+## 파일 설명
+
+- SAT-App.exe: 메인 실행 파일
+- index_v2.html: 웹 인터페이스
+- js/: JavaScript 모듈들
+- range_server_custom.py: Range 서버 (exe에 내장됨)
+- README.md: 자세한 사용법
+
+## 문제 해결
+
+1. exe 파일이 실행되지 않는 경우:
+   - 바이러스 백신 예외 처리
+   - Windows Defender 실시간 보호 일시 해제
+
+2. 브라우저가 열리지 않는 경우:
+   - 수동으로 http://localhost:8080/index_v2.html 접속
+
+3. 서버 포트 오류:
+   - 다른 프로그램이 8080, 8083 포트 사용 중인지 확인
