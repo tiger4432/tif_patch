@@ -477,6 +477,7 @@
           <button id="toggleSyncMode">Sync Layers</button>
           <button id="downloadVoids">Download Voids JSON</button>
           <button id="voidStats">Void Stats</button>
+          <button id="showSummary">Show Type Summary</button>
         </div>
         <div id="patchNav" style="margin-bottom: 10px; text-align: center">
           <button id="prevPage">◀ Prev</button>
@@ -502,6 +503,7 @@
       } from "./js/utils.js";
       import { VoidManagerV2 } from "./js/voidManager_v2.js";
       import { ImageProcessor } from "./js/imageProcessor.js";
+      import { PatchManager } from "./js/patchManager.js";
 
       // 전역 상태
       class WaferAppV2 {
@@ -513,12 +515,13 @@
           this.refGrid = { x: 0, y: 0 };
           this.csvRows = [];
           this.chipPoints = [];
-          this.allPatchPages = [];
-          this.currentPatchPage = 0;
           this.currentTiffFileName = null; // 현재 로드된 TIFF 파일명
 
           // 새로운 보이드 매니저
           this.voidManager = new VoidManagerV2();
+
+          // 패치 매니저 초기화
+          this.patchManager = new PatchManager(this.voidManager, this);
           this.voidMarkMode = false;
           this.deleteVoidMode = false;
           this.selectedVoid = null;
@@ -782,18 +785,20 @@
           this.syncBtn.onclick = () => {
             const newState = this.voidManager.toggleSyncMode();
             this.syncBtn.classList.toggle("mode-on", newState);
-            this.refreshCurrentPatches();
+            this.patchManager.refreshCurrentPatches();
           };
 
           // 기타 버튼들
           document.getElementById("extractBtn").onclick = async () =>
-            await this.extractPatches();
+            await this.patchManager.extractPatches();
           document.getElementById("downloadZipBtn").onclick = () =>
             this.downloadZip();
           document.getElementById("downloadVoids").onclick = () =>
             this.downloadVoids();
           document.getElementById("voidStats").onclick = () =>
             this.showVoidStats();
+          document.getElementById("showSummary").onclick = () =>
+            this.showTypeSummary();
           document.getElementById("debugBtn").onclick = () => this.debugCheck();
 
           // 메타데이터 로드 (복붙 방식)
@@ -854,9 +859,13 @@
 
           // 패치 네비게이션
           document.getElementById("prevPage").onclick = async () =>
-            await this.showPatchPage(this.currentPatchPage - 1);
+            await this.patchManager.showPatchPage(
+              this.patchManager.currentPatchPage - 1
+            );
           document.getElementById("nextPage").onclick = async () =>
-            await this.showPatchPage(this.currentPatchPage + 1);
+            await this.patchManager.showPatchPage(
+              this.patchManager.currentPatchPage + 1
+            );
 
           // 키보드 단축키
           document.addEventListener("keydown", (e) => {
@@ -913,7 +922,7 @@
             }
 
             // 해당 좌표의 패치를 찾아서 이동
-            await this.navigateToChipPatch(chipX, chipY);
+            await this.patchManager.navigateToChipPatch(chipX, chipY);
           });
         }
 
@@ -958,17 +967,17 @@
          * 특정 칩 좌표의 패치로 이동
          */
         async navigateToChipPatch(chipX, chipY) {
-          if (this.allPatchPages.length === 0) return;
+          if (this.patchManager.allPatchPages.length === 0) return;
 
           // 해당 좌표의 패치 찾기
           const targetCoord = `(${chipX},${chipY})`;
-          const patchIndex = this.allPatchPages.findIndex(
+          const patchIndex = this.patchManager.allPatchPages.findIndex(
             (patch) => patch.coord === targetCoord
           );
 
           if (patchIndex !== -1) {
-            this.currentPatchPage = patchIndex;
-            await this.showPatchPage(patchIndex);
+            this.patchManager.currentPatchPage = patchIndex;
+            await this.patchManager.showPatchPage(patchIndex);
             await this.drawPage(); // 초록점 업데이트
 
             console.log(
@@ -1080,9 +1089,9 @@
          * 현재 보고 있는 패치를 초록점으로 표시 (스케일 적용)
          */
         drawCurrentPatchIndicator(cellW, cellH, scaledOriginX, scaledOriginY) {
-          if (this.allPatchPages.length === 0) return;
+          if (this.patchManager.allPatchPages.length === 0) return;
 
-          const currentPatch = this.allPatchPages[this.currentPatchPage];
+          const currentPatch = this.patchManager.allPatchPages[this.patchManager.currentPatchPage];
           if (!currentPatch) return;
 
           // 현재 패치의 좌표 파싱
@@ -1425,7 +1434,7 @@
               }
 
               if (newVoid) {
-                this.refreshCurrentPatches();
+                this.patchManager.refreshCurrentPatches();
                 this.updateVoidJsonDisplay(); // JSON 업데이트 추가
               } else {
                 repaint();
@@ -1464,7 +1473,7 @@
             console.log(`Delete result: ${deleted}`);
 
             if (deleted) {
-              this.refreshCurrentPatches();
+              this.patchManager.refreshCurrentPatches();
               this.updateVoidJsonDisplay(); // JSON 업데이트 추가
             }
           });
@@ -1536,7 +1545,7 @@
               document.removeEventListener("mouseup", upHandler);
 
               // 변경사항 저장 (실제로는 이미 editableVoid 객체가 수정되었음)
-              this.refreshCurrentPatches();
+              this.patchManager.refreshCurrentPatches();
               this.updateVoidJsonDisplay(); // JSON 업데이트 추가
               this.selectedVoid = null;
             };
@@ -1618,7 +1627,7 @@
         }
 
         downloadZip() {
-          if (!window.allPatchCanvases || !window.allPatchCanvases.length) {
+          if (!this.patchManager.allPatchCanvases || !this.patchManager.allPatchCanvases.length) {
             alert("먼저 Extract Patches를 실행하세요.");
             return;
           }
@@ -1692,25 +1701,76 @@ Version: ${metadata.version}
           });
 
           // 모든 패치 분류 및 저장
-          window.allPatchCanvases.forEach((p) => {
+          this.patchManager.allPatchCanvases.forEach((p) => {
             const hasVoids = patchesWithVoids.has(p.label);
-            const voidStatus = hasVoids ? "with_voids" : "no_voids";
-            const folderPath = `${voidStatus}/${p.type}/layer_${String(
-              p.layer
-            ).padStart(2, "0")}`;
-            const folder = zip.folder(folderPath);
-            const dataURL = p.canvas.toDataURL("image/png").split(",")[1];
-            folder.file(`${p.label}.png`, dataURL, { base64: true });
+
+            // 1. no_voids 폴더: void가 없는 칩들의 원본 패치
+            if (!hasVoids) {
+              const folderPath = `no_voids/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+              const folder = zip.folder(folderPath);
+              const originalCanvas = p.originalCanvas || p.canvas;
+              const dataURL = originalCanvas.toDataURL("image/png").split(",")[1];
+              folder.file(`${p.label}.png`, dataURL, { base64: true });
+              patchesWithoutVoids.add(p.label);
+            }
+
+            // 2. split 폴더: 모든 패치 (void 마킹된 버전 또는 빈 마스크)
+            const splitFolderPath = `split/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+            const splitFolder = zip.folder(splitFolderPath);
+            const splitDataURL = p.canvas.toDataURL("image/png").split(",")[1];
+            splitFolder.file(`${p.label}.png`, splitDataURL, { base64: true });
 
             if (hasVoids) {
               patchesWithVoids.add(p.label);
-            } else {
-              patchesWithoutVoids.add(p.label);
             }
           });
 
-          // merge mask 생성 및 추가 (패치 뷰어에 보이는 그대로)
-          this.addViewerMasksToZip(zip);
+          // split 폴더에 merge mask 추가 (모든 칩에 대해, void 없으면 빈 마스크)
+          const processedChips = new Set();
+          this.patchManager.allPatchPages.forEach((patchPage) => {
+            const chipCoord = patchPage.coord;
+            const chipType = patchPage.type;
+
+            if (processedChips.has(chipCoord)) return;
+            processedChips.add(chipCoord);
+
+            // 해당 칩에 void가 있는지 확인
+            const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+            if (!match) return;
+
+            const chipX = parseInt(match[1]);
+            const chipY = parseInt(match[2]);
+
+            // 모든 칩에 대해 merge mask 생성 (void 없으면 빈 마스크)
+            const voidMaskCanvas = this.patchManager.createVoidMaskCanvas(chipCoord, chipType, true);
+            if (voidMaskCanvas) {
+              const safeFolderName = chipType.replace(/[^a-zA-Z0-9_-]/g, "_");
+              const folderPath = `split/${safeFolderName}/merge`;
+              const folder = zip.folder(folderPath);
+              const label = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L00_LEG:${chipType}`;
+              const dataURL = voidMaskCanvas.toDataURL("image/png").split(",")[1];
+              folder.file(`${label}.png`, dataURL, { base64: true });
+            }
+          });
+
+          // summary 폴더에 type별 통합 void 마스크 추가
+          console.log("Creating summary masks...");
+          console.log(`Total voids in system: ${this.voidManager.voids.size}`);
+          const summaryMasks = this.patchManager.createAllTypeSummaryMasks();
+          console.log(`Summary masks created: ${summaryMasks.size} types`, Array.from(summaryMasks.keys()));
+
+          if (summaryMasks.size > 0) {
+            summaryMasks.forEach((summaryCanvas, chipType) => {
+              const summaryFolder = zip.folder("summary");
+              const safeFileName = chipType.replace(/[^a-zA-Z0-9_-]/g, "_");
+              const summaryLabel = `${safeFileName}_summary_all_voids`;
+              const summaryDataURL = summaryCanvas.toDataURL("image/png").split(",")[1];
+              summaryFolder.file(`${summaryLabel}.png`, summaryDataURL, { base64: true });
+              console.log(`Added summary mask for type: ${chipType} as ${summaryLabel}.png`);
+            });
+          } else {
+            console.warn("No summary masks created - no types found or no voids detected");
+          }
 
           zip.generateAsync({ type: "blob" }).then((content) => {
             // 사용자 지정 파일명 또는 기본값 사용
@@ -1731,7 +1791,7 @@ Version: ${metadata.version}
             console.log("ZIP contents:", {
               patchesWithVoids: patchesWithVoids.size,
               patchesWithoutVoids: patchesWithoutVoids.size,
-              totalPatches: window.allPatchCanvases.length,
+              totalPatches: this.patchManager.allPatchCanvases.length,
               metadata: "included",
               voidData: "included",
               coordinates: this.csvRows.length,
@@ -1739,74 +1799,45 @@ Version: ${metadata.version}
           });
         }
 
-        addViewerMasksToZip(zip) {
-          // 각 칩 좌표별로 현재 뷰어에 보이는 canvas들을 그대로 저장
-          const processedChips = new Set();
+        showTypeSummary() {
+          if (!this.patchManager.allPatchPages.length) {
+            alert("먼저 Extract Patches를 실행하세요.");
+            return;
+          }
 
-          this.allPatchPages.forEach((patchPage) => {
-            const chipCoord = patchPage.coord;
-            const t = patchPage.type;
-            if (processedChips.has(chipCoord)) return;
-            processedChips.add(chipCoord);
+          // 모든 타입의 summary 마스크 생성
+          const summaryMasks = this.patchManager.createAllTypeSummaryMasks();
 
-            // 칩 좌표 파싱
-            const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
-            if (!match) return;
+          if (summaryMasks.size === 0) {
+            alert("생성할 summary가 없습니다. void를 마킹한 후 다시 시도하세요.");
+            return;
+          }
 
-            const chipX = parseInt(match[1]);
-            const chipY = parseInt(match[2]);
+          // 패치 뷰어에 summary 마스크들 표시
+          const patchesDiv = document.getElementById("patches");
+          patchesDiv.innerHTML = "";
 
-            // 해당 칩의 보이드가 있는지 확인
-            let hasVoids = false;
-            for (const [
-              voidKey,
-              voidData,
-            ] of this.voidManager.voids.entries()) {
-              if (voidData.x === chipX && voidData.y === chipY) {
-                hasVoids = true;
-                break;
-              }
-            }
+          const wrap = document.createElement("div");
+          wrap.className = "coord-card";
+          wrap.innerHTML = `<h3>Type Summary - All Void Patterns</h3>`;
 
-            // 칩 타입 추출 (첫 번째 레이어에서)
-            const firstLayer = patchPage.layers[0];
-            const chipType = firstLayer ? firstLayer.type : "NA";
+          const layersWrap = document.createElement("div");
+          layersWrap.className = "layers-wrap";
 
-            // 첫 번째 레이어 canvas를 기반으로 merge mask 생성
-            const sourceCanvas = firstLayer.canvas;
-
-            // merge mask 캔버스 생성 (원본과 같은 크기)
-            const maskCanvas = document.createElement("canvas");
-            maskCanvas.width = sourceCanvas.width;
-            maskCanvas.height = sourceCanvas.height;
-            const maskCtx = maskCanvas.getContext("2d");
-
-            // 타이틀 부분을 merge 레이블로 수정
-            const titleH = 40;
-            const patchSize = 300;
-            const label = `X${padCoord(chipX)}_Y${padCoord(
-              chipY
-            )}_L00_LEG:${t}`;
-            maskCtx.fillStyle = "#000";
-            maskCtx.fillRect(0, 0, patchSize, titleH);
-            maskCtx.fillStyle = "#fff";
-            maskCtx.font = "20px sans-serif";
-            maskCtx.textBaseline = "middle";
-            maskCtx.fillText(label, 6, titleH / 2);
-
-            // 패치 뷰어에서와 동일하게 void들 그리기 (모든 레이어의 void들 실선으로)
-            this.voidManager.drawVoidMask(maskCtx, chipCoord, 0);
-
-            // ZIP에 추가
-            const folderPath = `split/${chipType}/merge`;
-            const folder = zip.folder(folderPath);
-            const dataURL = maskCanvas.toDataURL("image/png").split(",")[1];
-            folder.file(`${label}.png`, dataURL, { base64: true });
-
-            console.log(
-              `Created viewer-based merge mask for chip ${chipCoord} with voids`
-            );
+          summaryMasks.forEach((summaryCanvas, chipType) => {
+            const item = document.createElement("div");
+            item.className = "layer-item";
+            item.innerHTML = `<div class="layer-label" style="color: #e74c3c">${chipType.toUpperCase()} - ALL VOIDS</div>`;
+            item.appendChild(summaryCanvas);
+            layersWrap.appendChild(item);
           });
+
+          wrap.appendChild(layersWrap);
+          patchesDiv.appendChild(wrap);
+
+          document.getElementById("pageInfo").textContent = `Type Summary (${summaryMasks.size} types)`;
+
+          console.log(`Displayed summary for types: ${Array.from(summaryMasks.keys()).join(', ')}`);
         }
 
         downloadVoids() {
@@ -2109,7 +2140,10 @@ Check console for details.`);
 
           // void 마스크 그리기 (void가 있는 경우에만)
           if (chipVoids.length > 0) {
-            this.voidManager.drawVoidMask(maskCtx, chipCoord, 0);
+            // 올바른 patchLabel 형태로 생성: X05_Y07_L01_LEG:type
+            const properPatchLabel = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L01_LEG:${type}`;
+            // mergeMode = true, titleOffset = titleH 사용
+            this.voidManager.drawVoids(maskCtx, properPatchLabel, true, titleH);
           }
           // void가 없으면 타이틀만 있는 빈 캔버스
 
@@ -2216,7 +2250,7 @@ Check console for details.`);
             extractionInfo: {
               totalPages: this.pages.length,
               totalCoordinates: this.csvRows.length,
-              totalPatches: this.allPatchPages.length * this.pages.length,
+              totalPatches: this.patchManager.allPatchPages.length * this.pages.length,
               patchSize: 300, // 고정 패치 크기
             },
             timestamp: new Date().toISOString(),
@@ -2253,7 +2287,7 @@ Check console for details.`);
             try {
               const jsonData = JSON.parse(voidJsonTextarea.value);
               this.loadVoidDataFromJson(jsonData);
-              this.refreshCurrentPatches();
+              this.patchManager.refreshCurrentPatches();
             } catch (error) {
               // JSON 파싱 오류 시 무시 (사용자가 타이핑 중일 수 있음)
             }
@@ -2390,7 +2424,9 @@ Check console for details.`);
 4	good	edge	good	good	good	good
 5	test	good	good	good	good	good`;
 
-            console.log("🚀 Quick Test Mode: Loading Bonding Map coordinates...");
+            console.log(
+              "🚀 Quick Test Mode: Loading Bonding Map coordinates..."
+            );
             this.csvRows = parseBondingMap(testBondingMap);
             this.chipPoints = this.csvRows.map((r) => ({ x: r.x, y: r.y }));
 
