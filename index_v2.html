@@ -292,6 +292,18 @@
     <div id="left">
       <h3>Load Data</h3>
       <div class="highlight-box" style="margin: 8px 0">
+        <button
+          id="quickTestBtn"
+          style="
+            font-size: 12px;
+            background: #28a745;
+            border-color: #28a745;
+            margin-bottom: 6px;
+            width: 100%;
+          "
+        >
+          🚀 Quick Test Mode
+        </button>
         <input
           id="localTiffPath"
           type="text"
@@ -334,7 +346,7 @@
       </div>
       <textarea
         id="csvPaste"
-        placeholder="Bonding Map 붙여넣기"
+        placeholder="Bonding Map 격자 형태 붙여넣기 (예: 탭으로 구분된 x,y 좌표 표)"
         style="height: 60px; font-size: 11px"
       ></textarea>
       <div style="margin-top: 6px">
@@ -416,6 +428,13 @@
 
       <button id="extractBtn">Extract Patches</button>
       <button id="downloadZipBtn">Download All Patches (ZIP)</button>
+      <label for="zipFileName">Save as:</label>
+      <input
+        type="text"
+        id="zipFileName"
+        placeholder="patches.zip"
+        style="margin-left: 5px; width: 200px"
+      />
       <button id="debugBtn">Debug Check</button>
 
       <h3>Load Settings</h3>
@@ -552,6 +571,11 @@
         }
 
         setupEventHandlers() {
+          // Quick Test Mode 버튼
+          document.getElementById("quickTestBtn").onclick = async () => {
+            await this.loadQuickTestData();
+          };
+
           // 로컬 서버에서 TIFF 로드 (Range 서버 사용)
           document.getElementById("loadLocalTiff").onclick = async () => {
             const filePath = document.getElementById("localTiffPath").value;
@@ -1238,10 +1262,10 @@
               );
 
               // 이미지 향상 먼저 수행
-              const subImg = ctx.getImageData(0, titleH, patchSize, patchSize);
+              const subImg = ctx.getImageData(0, titleH, c.width, c.height);
               const tmp = document.createElement("canvas");
-              tmp.width = patchSize;
-              tmp.height = patchSize;
+              tmp.width = c.width;
+              tmp.height = c.height;
               tmp.getContext("2d").putImageData(subImg, 0, 0);
               ImageProcessor.enhanceToTarget(
                 tmp.getContext("2d"),
@@ -1250,7 +1274,7 @@
                 pad
               );
               ctx.putImageData(
-                tmp.getContext("2d").getImageData(0, 0, patchSize, patchSize),
+                tmp.getContext("2d").getImageData(0, 0, c.width, c.height),
                 0,
                 titleH
               );
@@ -1612,6 +1636,10 @@
           };
           zip.file("coordinates.json", JSON.stringify(coordinateInfo, null, 2));
 
+          // voids 데이터 추가
+          const voidData = this.voidManager.exportVoids();
+          zip.file("voids.json", JSON.stringify(voidData, null, 2));
+
           // README 파일 추가
           const readmeContent = `# Wafer Patch Extraction Data
           
@@ -1643,32 +1671,69 @@ Version: ${metadata.version}
 - Patch Size: ${metadata.extractionInfo.patchSize}px
 
 ## Structure
-- split/[type]/layer_[XX]/[patch_name].png
+- with_voids/[type]/layer_[XX]/[patch_name].png (patches containing voids)
+- no_voids/[type]/layer_[XX]/[patch_name].png (patches without voids)
+- merge/[type]/[patch_name]_merge.png (merged mask layers)
 - metadata.json: Grid and extraction settings
 - coordinates.json: Chip coordinate data
+- voids.json: Void detection data
 `;
           zip.file("README.txt", readmeContent);
 
-          // 패치 이미지들 추가
+          // 패치 이미지들 구분해서 추가 (void가 있는 것과 없는 것 분리)
+          const patchesWithVoids = new Set();
+          const patchesWithoutVoids = new Set();
+
+          // void가 있는 패치들 식별
+          Object.keys(voidData).forEach((patchLabel) => {
+            if (voidData[patchLabel] && voidData[patchLabel].length > 0) {
+              patchesWithVoids.add(patchLabel);
+            }
+          });
+
+          // 모든 패치 분류 및 저장
           window.allPatchCanvases.forEach((p) => {
-            const folderPath = `split/${p.type}/layer_${String(
+            const hasVoids = patchesWithVoids.has(p.label);
+            const voidStatus = hasVoids ? "with_voids" : "no_voids";
+            const folderPath = `${voidStatus}/${p.type}/layer_${String(
               p.layer
             ).padStart(2, "0")}`;
             const folder = zip.folder(folderPath);
             const dataURL = p.canvas.toDataURL("image/png").split(",")[1];
             folder.file(`${p.label}.png`, dataURL, { base64: true });
+
+            if (hasVoids) {
+              patchesWithVoids.add(p.label);
+            } else {
+              patchesWithoutVoids.add(p.label);
+            }
           });
 
           // merge mask 생성 및 추가 (패치 뷰어에 보이는 그대로)
           this.addViewerMasksToZip(zip);
 
           zip.generateAsync({ type: "blob" }).then((content) => {
-            const fileName = this.generateFileName("patches", ".zip");
+            // 사용자 지정 파일명 또는 기본값 사용
+            const userFileName = document
+              .getElementById("zipFileName")
+              .value.trim();
+            let fileName;
+            if (userFileName) {
+              fileName = userFileName.endsWith(".zip")
+                ? userFileName
+                : userFileName + ".zip";
+            } else {
+              fileName = this.generateFileName("patches", ".zip");
+            }
+
             saveAs(content, fileName);
             console.log(`Downloaded patches ZIP: ${fileName}`);
             console.log("ZIP contents:", {
-              patches: window.allPatchCanvases.length,
+              patchesWithVoids: patchesWithVoids.size,
+              patchesWithoutVoids: patchesWithoutVoids.size,
+              totalPatches: window.allPatchCanvases.length,
               metadata: "included",
+              voidData: "included",
               coordinates: this.csvRows.length,
             });
           });
@@ -2275,6 +2340,128 @@ Check console for details.`);
             ctx.strokeStyle = "white";
             ctx.lineWidth = 1;
             ctx.stroke();
+          }
+        }
+
+        /**
+         * Quick Test Mode - 테스트 데이터 자동 로드
+         */
+        async loadQuickTestData() {
+          const quickBtn = document.getElementById("quickTestBtn");
+          const originalText = quickBtn.textContent;
+
+          try {
+            quickBtn.textContent = "Loading Test Data...";
+            quickBtn.disabled = true;
+
+            // 1. 테스트용 TIFF 파일 설정 및 로드
+            const testTiffPath = "/realistic_wafer_sample_fast_1000.tif";
+            document.getElementById("localTiffPath").value = testTiffPath;
+
+            console.log("🚀 Quick Test Mode: Loading TIFF file...");
+
+            // TIFF 로드
+            const rangeServerUrl = `http://localhost:8083${testTiffPath}`;
+            this.currentTiffFileName = "realistic_wafer_sample_fast";
+
+            this.showProgress();
+            this.updateProgress(10, "Loading test TIFF...", rangeServerUrl);
+
+            this.pages = await ImageProcessor.loadTiffFromServer(
+              rangeServerUrl,
+              (current, total, details) => {
+                const progress = 10 + (current / total) * 40; // 10-50%
+                this.updateProgress(
+                  progress,
+                  `Loading page ${current}/${total}`,
+                  details
+                );
+              }
+            );
+
+            this.updateProgress(55, "Loading test coordinates...", "");
+
+            // 2. 테스트용 Bonding Map 격자 데이터 로드
+            const testBondingMap = `	0	1	2	3	4	5
+0	good	dummy	test	edge	good	test
+1	dummy	good	good	good	edge	good
+2	test	good	good	good	good	good
+3	edge	good	good	good	good	good
+4	good	edge	good	good	good	good
+5	test	good	good	good	good	good`;
+
+            console.log("🚀 Quick Test Mode: Loading Bonding Map coordinates...");
+            this.csvRows = parseBondingMap(testBondingMap);
+            this.chipPoints = this.csvRows.map((r) => ({ x: r.x, y: r.y }));
+
+            // Bonding Map textarea에 데이터 표시
+            document.getElementById("csvPaste").value = testBondingMap;
+
+            this.updateProgress(
+              70,
+              "Updating UI...",
+              "Page selector and preview"
+            );
+
+            // 3. UI 업데이트
+            this.updatePageSelect();
+            await this.drawPage();
+            this.updateGridPreview();
+
+            this.updateProgress(
+              90,
+              "Setting optimal settings...",
+              "Grid and enhancement"
+            );
+
+            // 4. 최적 설정 적용
+            document.getElementById("cols").value = 6;
+            document.getElementById("rows").value = 6;
+            document.getElementById("cellW").value = 150;
+            document.getElementById("cellH").value = 150;
+            document.getElementById("alpha").value = 1.3;
+            document.getElementById("beta").value = 15;
+            document.getElementById("targetMean").value = 0.5;
+            document.getElementById("targetStd").value = 0.2;
+
+            // 기준점 설정
+            document.getElementById("refX").value = 0;
+            document.getElementById("refY").value = 0;
+            this.refGrid = { x: 0, y: 0 };
+
+            this.updateProgress(
+              100,
+              "Test data loaded!",
+              "Ready for patch extraction"
+            );
+
+            console.log("🚀 Quick Test Mode: Complete!");
+            console.log(`- TIFF: ${this.pages.length} pages loaded`);
+            console.log(`- Coordinates: ${this.csvRows.length} chips loaded`);
+
+            setTimeout(() => this.hideProgress(), 2000);
+
+            alert(`🚀 Quick Test Mode Complete!
+
+📊 Data Loaded:
+- TIFF: ${this.pages.length} pages
+- Coordinates: ${this.csvRows.length} chips
+- Grid: 6x6, Cell: 150x150px
+- Range: x(0~5), y(0~5)
+
+✅ Ready for testing:
+1. Click "Extract Patches" to generate patches
+2. Use void marking tools in right panel
+3. Test sync mode and export features
+
+Happy testing! 🎯`);
+          } catch (error) {
+            console.error("Quick Test Mode failed:", error);
+            alert(`Quick Test Mode failed: ${error.message}`);
+            this.hideProgress();
+          } finally {
+            quickBtn.textContent = originalText;
+            quickBtn.disabled = false;
           }
         }
       }

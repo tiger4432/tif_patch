@@ -1,38 +1,69 @@
-# Wafer Grid Tool
+# SAT - Semiconductor Analysis Tool
 
-웨이퍼 이미지 분석 및 보이드 마킹 도구
+웨이퍼 패치 분석 및 보이드 검출 도구
+
+## 🚀 빠른 시작
+
+### Windows에서 실행
+
+1. **SAT-App.bat** 파일을 더블클릭하여 실행
+2. 자동으로 브라우저가 열리고 애플리케이션이 시작됩니다
+3. 사용이 끝나면 콘솔 창에서 `Ctrl+C`를 눌러 종료
+
+### 수동 실행 (Python)
+
+```bash
+python launch_app.py
+```
+
+## 📋 시스템 요구사항
+
+- **Python 3.7 이상**
+- **웹 브라우저** (Chrome, Firefox, Edge 등)
+- **메모리**: 최소 4GB RAM (대용량 TIFF 파일 처리 시 8GB 이상 권장)
 
 ## 🏗️ 프로젝트 구조
 
 ### 📁 파일 구조
 ```
-sat/
-├── index.html                 # 원본 버전 (1350줄, 모든 기능 포함)
-├── index_refactored.html      # 리팩토링 버전 (모듈화)
-├── index2.html               # 실험용 버전 (미완성)
-├── js/                       # 모듈화된 JavaScript
-│   ├── constants.js          # 상수 정의
-│   ├── utils.js              # 유틸리티 함수
-│   ├── voidManager.js        # 보이드 관리 클래스
-│   └── imageProcessor.js     # 이미지 처리
+SAT/
+├── SAT-App.bat              # Windows 실행 파일
+├── launch_app.py            # Python 런처
+├── range_server_custom.py   # Range 요청 지원 서버
+├── index_v2.html           # 메인 웹 인터페이스
+├── js/
+│   ├── voidManager_v2.js   # 보이드 관리 모듈
+│   ├── constants.js        # 상수 정의
+│   └── utils.js           # 유틸리티 함수
+├── test/                   # 테스트 파일들
 ├── generate_realistic_wafer_fast.py  # 샘플 이미지 생성
 ├── realistic_wafer_sample_fast.tif   # 테스트용 TIFF (12.7MB)
 └── sample_chip_coordinates.csv       # 테스트용 칩 좌표
 ```
 
-### 🚀 실행 방법
+## 🔧 기능
 
-#### 옵션 1: VS Code Live Server (권장)
-1. VS Code에서 프로젝트 열기
-2. `index_refactored.html` 우클릭 → "Open with Live Server"
-3. 또는 F1 → "Live Server: Open with Live Server"
+### 1. TIFF 파일 로드
+- 대용량 멀티페이지 TIFF 파일 지원
+- Range 요청을 통한 효율적인 메모리 사용
+- 실시간 로딩 진행률 표시
 
-#### 옵션 2: Python 서버
-```bash
-cd sat
-python -m http.server 8080
-# http://localhost:8080/index_refactored.html 접속
-```
+### 2. 패치 추출
+- CSV 좌표 기반 자동 패치 추출
+- 사용자 정의 패치 크기 및 향상 설정
+- 배치 처리 지원
+
+### 3. 보이드 검출 및 분석
+- **void**: 일반적인 보이드 (빨간색 타원)
+- **crack**: 크랙 (초록색 타원)  
+- **particle**: 파티클 (파란색 타원)
+- **bbox**: 경계 상자 (주황색 사각형)
+
+### 4. 데이터 내보내기
+- ZIP 형태로 패치 및 메타데이터 내보내기
+- split/[type]/layer_XX/ 구조로 체계적 저장
+- merge 마스크 자동 생성 (split/[type]/merge/)
+- JSON 형태의 보이드 데이터 내보내기
 
 ## 🎯 주요 기능
 

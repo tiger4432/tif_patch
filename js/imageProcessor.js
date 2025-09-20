@@ -60,6 +60,7 @@ export class ImageProcessor {
     if (!ctx) return;
 
     const canvas = ctx.canvas;
+    console.log(canvas.height, canvas.width);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const imageDataSampled = ctx.getImageData(
       pad,
