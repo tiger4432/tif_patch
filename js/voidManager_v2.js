@@ -276,6 +276,7 @@ export class VoidManagerV2 {
       realChipSize = 1000, // μm
       canvasChipSize = 100, // pixels
       showSizes = false,
+      scaleFactor = 1,
     } = options;
 
     if (!voids || voids.length === 0) return;
@@ -294,18 +295,18 @@ export class VoidManagerV2 {
       if (voidData.type === "bbox") {
         // bbox 타입이면 사각형 그리기
         ctx.strokeRect(
-          voidData.centerX,
-          voidData.centerY + titleOffset,
-          voidData.radiusX,
-          voidData.radiusY
+          voidData.centerX * scaleFactor,
+          (voidData.centerY + titleOffset) * scaleFactor,
+          voidData.radiusX * scaleFactor,
+          voidData.radiusY * scaleFactor
         );
       } else {
         // 일반 void 타입이면 타원 그리기
         ctx.ellipse(
-          voidData.centerX,
-          voidData.centerY + titleOffset,
-          voidData.radiusX,
-          voidData.radiusY,
+          voidData.centerX * scaleFactor,
+          (voidData.centerY + titleOffset) * scaleFactor,
+          voidData.radiusX * scaleFactor,
+          voidData.radiusY * scaleFactor,
           0,
           0,
           2 * Math.PI
@@ -317,7 +318,7 @@ export class VoidManagerV2 {
       if (showSizes && voidData.type === "dela") {
         ctx.setLineDash([]); // 텍스트는 실선으로
         ctx.fillStyle = VOID_COLORS[voidData.type] || "#0000ff";
-        ctx.font = "10px Arial";
+        ctx.font = "14px Arial";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
@@ -339,8 +340,13 @@ export class VoidManagerV2 {
         )}μm`;
 
         // 텍스트 위치 (void 중심 아래쪽)
-        const textX = voidData.centerX;
-        const textY = voidData.centerY + titleOffset + voidData.radiusY + 12;
+        const textX = voidData.centerX * scaleFactor;
+        const textY = Math.min(
+          (voidData.centerY + titleOffset) * scaleFactor +
+            voidData.radiusY * scaleFactor +
+            12,
+          ctx.canvas.height - 20
+        );
 
         // 텍스트 배경 (가독성을 위해)
         const textMetrics = ctx.measureText(sizeText);
@@ -383,6 +389,7 @@ export class VoidManagerV2 {
       realChipSize = 1000, // μm
       canvasChipSize = 100, // pixels (패치 크기)
       showSizes = true,
+      scaleFactor = 1,
     } = options;
 
     // 1. 현재 레이어의 보이드들 (실선)
@@ -394,6 +401,7 @@ export class VoidManagerV2 {
       realChipSize,
       canvasChipSize,
       showSizes,
+      scaleFactor,
     });
 
     // 2. 다른 레이어의 보이드들 (점선) - 동기화 모드일 때만
@@ -406,26 +414,7 @@ export class VoidManagerV2 {
         realChipSize,
         canvasChipSize,
         showSizes: false, // 점선 void는 크기 표시 안함
-      });
-    }
-
-    // 3. bbox 그리기 (옵션이 활성화된 경우)
-    if (this.showBbox) {
-      const chipKey = this.createChipKey(x, y);
-      const chipBboxes = this.bboxes.get(chipKey) || [];
-      console.log(
-        `Drawing bbox for chip (${x}, ${y}), key: ${chipKey}, bboxes:`,
-        chipBboxes
-      );
-      chipBboxes.forEach((bbox) => {
-        console.log(`Drawing bbox:`, bbox);
-        ctx.beginPath();
-        ctx.strokeStyle = "#ffaa00"; // 주황색
-        ctx.lineWidth = 2;
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1.0;
-        ctx.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
-        ctx.stroke();
+        scaleFactor,
       });
     }
   }
@@ -453,6 +442,7 @@ export class VoidManagerV2 {
       titleOffset: titleOffset,
       alpha: 1.0,
       lineDash: [],
+      scaleFactor: 1,
     });
   }
 
@@ -690,22 +680,8 @@ export class VoidManagerV2 {
     const { cols, rows, refGrid } = gridSettings;
     const lines = [];
 
-    // 헤더 추가
-    lines.push("# Bin Map (Tab-separated)");
-    lines.push(`# Grid Size: ${cols} x ${rows}`);
-    lines.push(`# Reference Grid: (${refGrid.x}, ${refGrid.y})`);
-    lines.push("# Legend:");
-    lines.push("#   0 = No Chip");
-    lines.push("#   1 = BIN1 (Good - No Defects)");
-    lines.push("#   2 = BIN2 (dela defects)");
-    lines.push("#   3 = BIN3 (edge defects)");
-    lines.push("#   4 = BIN4 (void defects)");
-    lines.push("#   6 = BIN6 (particle defects)");
-    lines.push("#  10 = BIN10 (void39, signal defects - highest priority)");
-    lines.push("");
-
     // X축 헤더 (열 번호)
-    const xHeader = ["Y\\X"];
+    const xHeader = [""];
     for (let x = 0; x < cols; x++) {
       xHeader.push((refGrid.x + x).toString());
     }

@@ -255,6 +255,18 @@
       </div>
       <div id="patches"></div>
     </div>
+
+    <!-- Patch Zoom Modal -->
+    <div id="patchZoomModal" class="patch-zoom-modal">
+      <div class="patch-zoom-content">
+        <div class="patch-zoom-header">
+          <h3 id="patchZoomTitle" class="patch-zoom-title">Patch Zoom</h3>
+          <button id="patchZoomClose" class="patch-zoom-close">×</button>
+        </div>
+        <canvas id="patchZoomCanvas" class="patch-zoom-canvas"></canvas>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
     <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
     <script type="module">
@@ -451,13 +463,15 @@
           // BIN_RULES에서 고유한 bin 번호들을 추출 (중복 제거)
           const uniqueBins = new Map();
           Object.entries(BIN_RULES).forEach(([key, binInfo]) => {
-            if (!uniqueBins.has(binInfo.bin) || key === 'default') {
+            if (!uniqueBins.has(binInfo.bin) || key === "default") {
               uniqueBins.set(binInfo.bin, binInfo);
             }
           });
 
           // bin 번호 순으로 정렬 (높은 번호가 먼저)
-          const sortedBins = Array.from(uniqueBins.entries()).sort((a, b) => b[0] - a[0]);
+          const sortedBins = Array.from(uniqueBins.entries()).sort(
+            (a, b) => b[0] - a[0]
+          );
 
           sortedBins.forEach(([binNumber, binInfo]) => {
             const count = binStats.byBin[binInfo.name]?.count || 0;
@@ -1612,8 +1626,10 @@
           const currentPage = this.allPatchPages[this.currentPatchPage];
 
           // 실제 크기 설정 값 가져오기
-          const realChipSize = +document.getElementById("realChipSize").value || 1000;
-          const canvasChipSize = +document.getElementById("canvasChipSize").value || 100;
+          const realChipSize =
+            +document.getElementById("realChipSize").value || 1000;
+          const canvasChipSize =
+            +document.getElementById("canvasChipSize").value || 100;
 
           currentPage.layers.forEach((layerInfo) => {
             const ctx = layerInfo.canvas.getContext("2d");
@@ -1621,7 +1637,7 @@
             this.voidManager.drawVoids(ctx, layerInfo.label, {
               realChipSize,
               canvasChipSize,
-              showSizes: true
+              showSizes: true,
             });
           });
 

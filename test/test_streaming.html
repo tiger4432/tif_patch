@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>GeoTIFF Streaming Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
+    <script src="https://unpkg.com/geotiff@2.1.3/dist/geotiff.bundle.js"></script>
+    <script>
+      // GeoTIFF 라이브러리 fallback 체인 (다양한 버전과 CDN)
+      window.geoTiffFallbackChain = [
+        "https://unpkg.com/geotiff@2.1.3/dist/geotiff.bundle.js",
+        "https://cdn.skypack.dev/geotiff@2.1.3",
+        "https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist/geotiff.bundle.js",
+        "https://unpkg.com/geotiff@2.0.7/dist/geotiff.bundle.js",
+        "https://cdn.skypack.dev/geotiff@2.0.7",
+        "https://esm.sh/geotiff@2.1.3",
+      ];
+    </script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+      }
+      button {
+        padding: 10px 15px;
+        margin: 5px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      .status-box {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 4px;
+      }
+      .success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+      .memory-box {
+        background: #f8f9fa;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .progress-bar {
+        width: 100%;
+        height: 20px;
+        background: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 10px 0;
+      }
+      .progress-fill {
+        height: 100%;
+        background: #28a745;
+        transition: width 0.3s ease;
+      }
+      .canvas-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      .canvas-item {
+        text-align: center;
+      }
+      .canvas-item canvas {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .canvas-label {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🌊 GeoTIFF Streaming Test</h1>
+
+    <div class="info status-box">
+      <strong>Advanced TIFF Processing with GeoTIFF Streaming</strong><br />
+      This page tests different streaming approaches for large TIFF files
+    </div>
+
+    <button onclick="testGeoTiffStreaming()">🔥 Test GeoTIFF Streaming</button>
+    <button onclick="testUtifStreaming()">⚡ Test UTIF Streaming</button>
+    <button onclick="testComparison()">📊 Compare Both Methods</button>
+    <button onclick="clearResults()">🧹 Clear Results</button>
+
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    </div>
+
+    <div class="memory-box" id="memoryInfo">
+      <strong>Memory Usage:</strong>
+      <span id="memoryValue">Initializing...</span>
+    </div>
+
+    <div id="statusLog"></div>
+    <div id="canvasContainer" class="canvas-container"></div>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
+    <script type="module">
+      import { ImageProcessor } from "./js/imageProcessor.js";
+
+      let memoryMonitor;
+      let startTime;
+
+      // 메모리 모니터링
+      function startMemoryMonitoring() {
+        if (memoryMonitor) clearInterval(memoryMonitor);
+
+        const startMemory = performance.memory
+          ? performance.memory.usedJSHeapSize
+          : 0;
+        startTime = Date.now();
+
+        memoryMonitor = setInterval(() => {
+          if (performance.memory) {
+            const current = (
+              performance.memory.usedJSHeapSize /
+              1024 /
+              1024
+            ).toFixed(1);
+            const start = (startMemory / 1024 / 1024).toFixed(1);
+            const limit = (
+              performance.memory.jsHeapSizeLimit /
+              1024 /
+              1024
+            ).toFixed(1);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            document.getElementById(
+              "memoryValue"
+            ).innerHTML = `${current}MB / ${limit}MB (started at ${start}MB) | ${elapsed}s elapsed`;
+          }
+        }, 1000);
+      }
+
+      function stopMemoryMonitoring() {
+        if (memoryMonitor) {
+          clearInterval(memoryMonitor);
+          memoryMonitor = null;
+        }
+      }
+
+      function updateProgress(percent) {
+        document.getElementById("progressFill").style.width = percent + "%";
+      }
+
+      function logStatus(message, type = "info") {
+        const statusLog = document.getElementById("statusLog");
+        const time = new Date().toLocaleTimeString();
+
+        const div = document.createElement("div");
+        div.className = `status-box ${type}`;
+        div.innerHTML = `<strong>[${time}]</strong> ${message}`;
+
+        statusLog.appendChild(div);
+        statusLog.scrollTop = statusLog.scrollHeight;
+
+        console.log(`[${time}] ${message}`);
+      }
+
+      function displayCanvas(canvas, label) {
+        const container = document.getElementById("canvasContainer");
+        const item = document.createElement("div");
+        item.className = "canvas-item";
+
+        // 캔버스 크기 조정 (표시용)
+        const displayCanvas = document.createElement("canvas");
+        const maxSize = 200;
+        const scale = Math.min(
+          1,
+          maxSize / Math.max(canvas.width, canvas.height)
+        );
+
+        displayCanvas.width = canvas.width * scale;
+        displayCanvas.height = canvas.height * scale;
+        displayCanvas.style.maxWidth = "200px";
+        displayCanvas.style.maxHeight = "200px";
+
+        const ctx = displayCanvas.getContext("2d");
+        ctx.drawImage(canvas, 0, 0, displayCanvas.width, displayCanvas.height);
+
+        const labelDiv = document.createElement("div");
+        labelDiv.className = "canvas-label";
+        labelDiv.textContent = `${label} (${canvas.width}x${canvas.height})`;
+
+        item.appendChild(displayCanvas);
+        item.appendChild(labelDiv);
+        container.appendChild(item);
+      }
+
+      // GeoTIFF 라이브러리 확인 및 상태 체크
+      function checkGeoTiffAvailability() {
+        // 다양한 이름으로 GeoTIFF 객체 찾기
+        const possibleNames = ["GeoTIFF", "geotiff", "GeoTiff"];
+
+        for (let name of possibleNames) {
+          if (typeof window[name] !== "undefined") {
+            if (name !== "GeoTIFF") {
+              window.GeoTIFF = window[name];
+            }
+
+            // 기본 메서드들이 있는지 확인
+            if (window.GeoTIFF.fromUrl && window.GeoTIFF.fromArrayBuffer) {
+              console.log(`✅ Found GeoTIFF as window.${name}`);
+              return true;
+            }
+          }
+        }
+
+        return false;
+      }
+
+      // GeoTIFF 기능 테스트
+      async function testGeoTiffFunctionality() {
+        try {
+          if (!window.GeoTIFF) return false;
+
+          // 기본 메서드 존재 확인
+          const hasFromUrl = typeof window.GeoTIFF.fromUrl === "function";
+          const hasFromArrayBuffer =
+            typeof window.GeoTIFF.fromArrayBuffer === "function";
+
+          console.log(
+            `GeoTIFF methods - fromUrl: ${hasFromUrl}, fromArrayBuffer: ${hasFromArrayBuffer}`
+          );
+
+          return hasFromUrl && hasFromArrayBuffer;
+        } catch (error) {
+          console.error("GeoTIFF functionality test failed:", error);
+          return false;
+        }
+      }
+
+      // GeoTIFF 스트리밍 테스트
+      window.testGeoTiffStreaming = async function () {
+        logStatus("🔥 Starting GeoTIFF streaming test...", "info");
+        startMemoryMonitoring();
+        updateProgress(0);
+
+        try {
+          // GeoTIFF 라이브러리 확인
+          if (!checkGeoTiffAvailability()) {
+            logStatus(
+              "❌ GeoTIFF library not available. Trying to load...",
+              "error"
+            );
+
+            // 동적으로 라이브러리 로드 시도 (fallback 체인 사용)
+            let loadSuccess = false;
+
+            for (let fallbackUrl of window.geoTiffFallbackChain) {
+              try {
+                logStatus(
+                  `Trying to load GeoTIFF from: ${fallbackUrl}`,
+                  "info"
+                );
+
+                await new Promise((resolve, reject) => {
+                  const script = document.createElement("script");
+                  script.src = fallbackUrl;
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+
+                // 잠시 대기
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+
+                if (checkGeoTiffAvailability()) {
+                  logStatus(
+                    `✅ GeoTIFF library loaded from: ${fallbackUrl}`,
+                    "success"
+                  );
+                  loadSuccess = true;
+                  break;
+                }
+              } catch (loadError) {
+                logStatus(`Failed to load from: ${fallbackUrl}`, "error");
+              }
+            }
+
+            if (!loadSuccess) {
+              logStatus(
+                "❌ All GeoTIFF CDNs failed. Using UTIF fallback.",
+                "error"
+              );
+              await testUtifStreaming();
+              return;
+            }
+          }
+
+          logStatus("✅ GeoTIFF library is available", "success");
+
+          // 기능 테스트
+          const functionalityOk = await testGeoTiffFunctionality();
+          if (!functionalityOk) {
+            logStatus(
+              "❌ GeoTIFF functionality test failed. Using UTIF fallback.",
+              "error"
+            );
+            await testUtifStreaming();
+            return;
+          }
+
+          logStatus("✅ GeoTIFF functionality verified", "success");
+
+          // 사용 가능한 TIFF 파일들 테스트 (Range 지원 서버 포트 8081 사용)
+          const testFiles = [
+            "http://localhost:8081/realistic_wafer_sample_fast.tif",
+            "http://localhost:8081/large_wafer_500chip_14900x14900_11layers.tif"
+          ];
+
+          for (let i = 0; i < testFiles.length; i++) {
+            const filePath = testFiles[i];
+            logStatus(`Testing file: ${filePath}`, "info");
+
+            try {
+              // 파일 존재 확인
+              const checkResponse = await fetch(filePath, { method: "HEAD" });
+              if (!checkResponse.ok) {
+                logStatus(`File not found: ${filePath}`, "error");
+                continue;
+              }
+
+              const fileSize = checkResponse.headers.get("content-length");
+              const fileSizeMB = fileSize
+                ? (parseInt(fileSize) / (1024 * 1024)).toFixed(1)
+                : "Unknown";
+              logStatus(`File size: ${fileSizeMB}MB`, "info");
+
+              updateProgress(10);
+
+              // GeoTIFF로 로드 (CORS 및 에러 처리 강화)
+              logStatus("Loading with GeoTIFF...", "info");
+
+              let tiff;
+              try {
+                // 첫 번째 시도: 직접 URL 사용 (Range 요청 지원하는 서버에서만 작동)
+                logStatus("Trying direct URL method...", "info");
+                tiff = await window.GeoTIFF.fromUrl(filePath);
+                logStatus("✅ Direct URL method successful", "success");
+              } catch (urlError) {
+                logStatus(`Direct URL failed: ${urlError.message}`, "error");
+                logStatus(
+                  "This is normal for Python http.server (no Range support)",
+                  "info"
+                );
+
+                // 두 번째 시도: fetch로 ArrayBuffer 가져와서 처리
+                logStatus(
+                  "Using fallback method with complete file download...",
+                  "info"
+                );
+                try {
+                  const response = await fetch(filePath, {
+                    method: "GET",
+                    headers: {
+                      Accept: "image/tiff,application/octet-stream,*/*",
+                    },
+                  });
+
+                  if (!response.ok) {
+                    throw new Error(
+                      `HTTP ${response.status}: ${response.statusText}`
+                    );
+                  }
+
+                  // 진행률 표시하면서 다운로드
+                  const contentLength = response.headers.get("content-length");
+                  const total = contentLength ? parseInt(contentLength) : 0;
+
+                  if (!response.body) {
+                    throw new Error("ReadableStream not supported");
+                  }
+
+                  const reader = response.body.getReader();
+                  const chunks = [];
+                  let received = 0;
+
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    chunks.push(value);
+                    received += value.length;
+
+                    if (total > 0) {
+                      const progress = 10 + (received / total) * 20; // 10-30% 범위
+                      updateProgress(progress);
+
+                      if (received % (5 * 1024 * 1024) === 0) {
+                        // 5MB마다 로그
+                        logStatus(
+                          `Downloaded: ${(received / (1024 * 1024)).toFixed(
+                            1
+                          )}MB / ${(total / (1024 * 1024)).toFixed(1)}MB`,
+                          "info"
+                        );
+                      }
+                    }
+                  }
+
+                  // ArrayBuffer로 결합
+                  const arrayBuffer = new ArrayBuffer(received);
+                  const uint8Array = new Uint8Array(arrayBuffer);
+                  let offset = 0;
+
+                  for (const chunk of chunks) {
+                    uint8Array.set(chunk, offset);
+                    offset += chunk.length;
+                  }
+
+                  logStatus(
+                    `✅ Downloaded complete file: ${(
+                      arrayBuffer.byteLength /
+                      (1024 * 1024)
+                    ).toFixed(1)}MB`,
+                    "success"
+                  );
+
+                  tiff = await window.GeoTIFF.fromArrayBuffer(arrayBuffer);
+                  logStatus(
+                    "✅ GeoTIFF object created from ArrayBuffer",
+                    "success"
+                  );
+                } catch (fetchError) {
+                  logStatus(
+                    `Fetch approach failed: ${fetchError.message}`,
+                    "error"
+                  );
+                  throw new Error(
+                    `Both GeoTIFF loading methods failed: ${urlError.message} | ${fetchError.message}`
+                  );
+                }
+              }
+
+              updateProgress(30);
+              logStatus(
+                "TIFF object created, getting image count...",
+                "success"
+              );
+
+              const imageCount = await tiff.getImageCount();
+              logStatus(`Found ${imageCount} images in TIFF`, "success");
+
+              updateProgress(50);
+
+              // 각 이미지를 스트리밍 방식으로 처리
+              for (let imgIdx = 0; imgIdx < Math.min(imageCount, 5); imgIdx++) {
+                logStatus(
+                  `Processing image ${imgIdx + 1}/${imageCount}...`,
+                  "info"
+                );
+
+                const image = await tiff.getImage(imgIdx);
+                const width = image.getWidth();
+                const height = image.getHeight();
+
+                logStatus(`Image ${imgIdx + 1}: ${width}x${height}`, "info");
+
+                // 스트리밍 방식으로 읽기 (청크 단위)
+                const maxSize = 2048; // 최대 2K 해상도
+                const scale = Math.min(1, maxSize / Math.max(width, height));
+                const scaledWidth = Math.round(width * scale);
+                const scaledHeight = Math.round(height * scale);
+
+                logStatus(`Scaling to: ${scaledWidth}x${scaledHeight}`, "info");
+
+                // 래스터 데이터를 청크 단위로 읽기
+                const rasters = await image.readRasters({
+                  width: scaledWidth,
+                  height: scaledHeight,
+                  resampleMethod: "bilinear",
+                });
+
+                // Canvas로 변환
+                const canvas = document.createElement("canvas");
+                canvas.width = scaledWidth;
+                canvas.height = scaledHeight;
+                const ctx = canvas.getContext("2d");
+
+                const imageData = ctx.createImageData(
+                  scaledWidth,
+                  scaledHeight
+                );
+                const data = imageData.data;
+
+                // 첫 번째 밴드 데이터 사용
+                const rasterData = rasters[0];
+
+                // RGBA 변환
+                for (let i = 0; i < scaledWidth * scaledHeight; i++) {
+                  const value = rasterData[i] || 0;
+                  const normalizedValue = Math.min(255, Math.max(0, value));
+
+                  const pixelIndex = i * 4;
+                  data[pixelIndex] = normalizedValue; // R
+                  data[pixelIndex + 1] = normalizedValue; // G
+                  data[pixelIndex + 2] = normalizedValue; // B
+                  data[pixelIndex + 3] = 255; // A
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                displayCanvas(canvas, `GeoTIFF Layer ${imgIdx + 1}`);
+
+                logStatus(
+                  `✅ Image ${imgIdx + 1} processed successfully`,
+                  "success"
+                );
+
+                const progress =
+                  50 + ((imgIdx + 1) / Math.min(imageCount, 5)) * 40;
+                updateProgress(progress);
+
+                // 메모리 압박 시 정리
+                if (
+                  performance.memory &&
+                  performance.memory.usedJSHeapSize /
+                    performance.memory.jsHeapSizeLimit >
+                    0.7
+                ) {
+                  logStatus(
+                    "High memory usage detected, forcing cleanup",
+                    "error"
+                  );
+                  if (window.gc) window.gc();
+                }
+              }
+
+              updateProgress(100);
+              logStatus(
+                `🎉 GeoTIFF streaming completed for ${filePath}!`,
+                "success"
+              );
+              break; // 첫 번째 성공한 파일로 테스트 완료
+            } catch (fileError) {
+              logStatus(`File test failed: ${fileError.message}`, "error");
+              continue;
+            }
+          }
+        } catch (error) {
+          logStatus(`❌ GeoTIFF streaming failed: ${error.message}`, "error");
+          console.error("GeoTIFF test error:", error);
+        } finally {
+          stopMemoryMonitoring();
+        }
+      };
+
+      // UTIF 스트리밍 테스트 (비교용)
+      window.testUtifStreaming = async function () {
+        logStatus("⚡ Starting UTIF streaming test...", "info");
+        startMemoryMonitoring();
+        updateProgress(0);
+
+        try {
+          const filePath = "./realistic_wafer_sample_fast.tif";
+          logStatus(`Testing UTIF with: ${filePath}`, "info");
+
+          const pages = await ImageProcessor.loadTiffFromServer(filePath);
+
+          logStatus(
+            `✅ UTIF streaming completed! Loaded ${pages.length} pages`,
+            "success"
+          );
+
+          // 결과 표시
+          pages.forEach((page, index) => {
+            displayCanvas(page, `UTIF Layer ${index + 1}`);
+          });
+
+          updateProgress(100);
+        } catch (error) {
+          logStatus(`❌ UTIF streaming failed: ${error.message}`, "error");
+          console.error("UTIF test error:", error);
+        } finally {
+          stopMemoryMonitoring();
+        }
+      };
+
+      // 두 방법 비교 테스트
+      window.testComparison = async function () {
+        logStatus("📊 Starting comparison test...", "info");
+
+        // 먼저 결과 초기화
+        clearResults();
+
+        logStatus("Testing GeoTIFF method...", "info");
+        await testGeoTiffStreaming();
+
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // 2초 대기
+
+        logStatus("Testing UTIF method...", "info");
+        await testUtifStreaming();
+
+        logStatus("🏁 Comparison test completed!", "success");
+      };
+
+      window.clearResults = function () {
+        document.getElementById("statusLog").innerHTML = "";
+        document.getElementById("canvasContainer").innerHTML = "";
+        updateProgress(0);
+        stopMemoryMonitoring();
+      };
+
+      // 초기 메모리 표시 및 라이브러리 체크
+      if (performance.memory) {
+        document.getElementById("memoryValue").innerHTML = `Initial: ${(
+          performance.memory.usedJSHeapSize /
+          1024 /
+          1024
+        ).toFixed(1)}MB`;
+      }
+
+      // 페이지 로드 시 라이브러리 상태 확인
+      setTimeout(() => {
+        const geoTiffAvailable = checkGeoTiffAvailability();
+        const utifAvailable = typeof window.UTIF !== "undefined";
+
+        logStatus(`🔍 Library Status Check:`, "info");
+        logStatus(
+          `• GeoTIFF: ${
+            geoTiffAvailable ? "✅ Available" : "❌ Not Available"
+          }`,
+          geoTiffAvailable ? "success" : "error"
+        );
+        logStatus(
+          `• UTIF: ${utifAvailable ? "✅ Available" : "❌ Not Available"}`,
+          utifAvailable ? "success" : "error"
+        );
+
+        if (geoTiffAvailable) {
+          logStatus("💡 Ready to test GeoTIFF streaming!", "success");
+        } else if (utifAvailable) {
+          logStatus(
+            "💡 GeoTIFF not available, but UTIF streaming is ready!",
+            "info"
+          );
+        } else {
+          logStatus("⚠️ No TIFF processing libraries available!", "error");
+        }
+      }, 100);
+    </script>
+  </body>
+</html>

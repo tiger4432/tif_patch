@@ -11,6 +11,7 @@ export class PatchManager {
     // 패치 데이터
     this.allPatchPages = [];
     this.currentPatchPage = 0;
+    this.initZoomModal();
   }
 
   /**
@@ -164,7 +165,7 @@ export class PatchManager {
   /**
    * void 이벤트 연결
    */
-  attachVoidEvents(canvas, patchLabel, imageData) {
+  attachVoidEvents(canvas, patchLabel, imageData, scaleFactor = 1) {
     const ctx = canvas.getContext("2d");
     const { chipCoord, layer } = parsePatchLabel(patchLabel);
     const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
@@ -175,21 +176,29 @@ export class PatchManager {
 
     const repaint = () => {
       ctx.putImageData(imageData, 0, 0);
-      const realChipSize = parseFloat(document.getElementById("realChipSize")?.value || 1000);
-      const canvasChipSize = parseFloat(document.getElementById("canvasChipSize")?.value || 100);
+      const realChipSize = parseFloat(
+        document.getElementById("realChipSize")?.value || 1000
+      );
+      const canvasChipSize = parseFloat(
+        document.getElementById("canvasChipSize")?.value || 100
+      );
       this.voidManager.drawVoids(ctx, patchLabel, {
         realChipSize,
-        canvasChipSize
+        canvasChipSize,
+        scaleFactor: scaleFactor,
       });
     };
+
+    repaint();
 
     // 보이드 마킹
     canvas.addEventListener("mousedown", (e) => {
       if (!this.app.voidMarkMode) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const scaleX = canvas.width / rect.width / scaleFactor;
+      const scaleY = canvas.height / rect.height / scaleFactor;
+
       const sx = (e.clientX - rect.left) * scaleX;
       const sy = (e.clientY - rect.top) * scaleY;
 
@@ -269,6 +278,7 @@ export class PatchManager {
         }
 
         if (newVoid) {
+          repaint();
           this.refreshCurrentPatches();
           this.app.updateVoidJsonDisplay(); // JSON 업데이트 추가
         } else {
@@ -288,8 +298,8 @@ export class PatchManager {
       if (!this.app.deleteVoidMode) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const scaleX = canvas.width / rect.width / scaleFactor;
+      const scaleY = canvas.height / rect.height / scaleFactor;
       const clickX = (e.clientX - rect.left) * scaleX;
       const clickY = (e.clientY - rect.top) * scaleY;
 
@@ -302,6 +312,7 @@ export class PatchManager {
       console.log(`Delete result: ${deleted}`);
 
       if (deleted) {
+        repaint();
         this.refreshCurrentPatches();
         this.app.updateVoidJsonDisplay(); // JSON 업데이트 추가
       }
@@ -312,8 +323,8 @@ export class PatchManager {
       if (this.app.voidMarkMode || this.app.deleteVoidMode) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const scaleX = canvas.width / rect.width / scaleFactor;
+      const scaleY = canvas.height / rect.height / scaleFactor;
       const clickX = (e.clientX - rect.left) * scaleX;
       const clickY = (e.clientY - rect.top) * scaleY;
 
@@ -327,8 +338,6 @@ export class PatchManager {
       if (!editableVoid) return;
 
       this.app.selectedVoid = editableVoid;
-      const originalCenterX = editableVoid.centerX;
-      const originalCenterY = editableVoid.centerY;
 
       // 이동 vs 크기조절 판단
       const dx = clickX - editableVoid.centerX;
@@ -341,7 +350,7 @@ export class PatchManager {
             (editableVoid.radiusX * Math.sin(angle)) ** 2
         );
       const dist = Math.hypot(dx, dy);
-
+      console.log(dist, rB);
       this.app.resizeMode = Math.abs(dist - rB) <= CONFIG.TOLERANCE;
       const offsetX = clickX - editableVoid.centerX;
       const offsetY = clickY - editableVoid.centerY;
@@ -374,6 +383,7 @@ export class PatchManager {
         document.removeEventListener("mouseup", upHandler);
 
         // 변경사항 저장 (실제로는 이미 editableVoid 객체가 수정되었음)
+        repaint();
         this.refreshCurrentPatches();
         this.app.updateVoidJsonDisplay(); // JSON 업데이트 추가
         this.app.selectedVoid = null;
@@ -395,8 +405,12 @@ export class PatchManager {
       return;
 
     // 실제 크기 설정 가져오기
-    const realChipSize = parseFloat(document.getElementById("realChipSize")?.value || 1000);
-    const canvasChipSize = parseFloat(document.getElementById("canvasChipSize")?.value || 100);
+    const realChipSize = parseFloat(
+      document.getElementById("realChipSize")?.value || 1000
+    );
+    const canvasChipSize = parseFloat(
+      document.getElementById("canvasChipSize")?.value || 100
+    );
 
     // 모든 패치 캔버스 업데이트 (저장용 + UI용 통일)
     this.updateAllPatchCanvases(realChipSize, canvasChipSize);
@@ -419,7 +433,7 @@ export class PatchManager {
         ctx.putImageData(layerInfo.imageData, 0, 0);
         this.voidManager.drawVoids(ctx, layerInfo.label, {
           realChipSize,
-          canvasChipSize
+          canvasChipSize,
         });
       });
     });
@@ -438,7 +452,7 @@ export class PatchManager {
             ctx.putImageData(layer.imageData, 0, 0);
             this.voidManager.drawVoids(ctx, patchInfo.label, {
               realChipSize,
-              canvasChipSize
+              canvasChipSize,
             });
           }
         }
@@ -475,6 +489,7 @@ export class PatchManager {
     const voidItem = document.createElement("div");
     voidItem.className = "layer-item";
     voidItem.innerHTML = `<div class="layer-label" style="color: #e74c3c">VOID MASK (ALL LAYERS)</div>`;
+
     voidItem.appendChild(voidMaskCanvas);
     layersWrap.appendChild(voidItem);
 
@@ -483,7 +498,19 @@ export class PatchManager {
       const item = document.createElement("div");
       item.className = "layer-item";
       item.innerHTML = `<div class="layer-label">${l.label}</div>`;
+
+      // 확대 버튼 추가
+      const zoomBtn = document.createElement("button");
+      zoomBtn.className = "zoom-btn";
+      zoomBtn.innerHTML = "🔍";
+      zoomBtn.title = "Zoom to 5x";
+      zoomBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.showZoomedPatch(l, page.coord);
+      };
+
       item.appendChild(l.canvas);
+      item.appendChild(zoomBtn);
       layersWrap.appendChild(item);
     });
 
@@ -496,6 +523,89 @@ export class PatchManager {
 
     // 현재 패치 변경 시 그리드의 초록점 업데이트
     await this.app.drawPage();
+  }
+
+  /**
+   * 모달 초기화 및 이벤트 설정
+   */
+  initZoomModal() {
+    const modal = document.getElementById("patchZoomModal");
+    const closeBtn = document.getElementById("patchZoomClose");
+
+    // 닫기 버튼 이벤트
+    closeBtn.onclick = () => {
+      modal.style.display = "none";
+    };
+
+    // 모달 배경 클릭 시 닫기
+    modal.onclick = (e) => {
+      if (e.target === modal) {
+        modal.style.display = "none";
+      }
+    };
+
+    // ESC 키로 닫기
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.style.display === "block") {
+        modal.style.display = "none";
+      }
+    });
+  }
+
+  /**
+   * 패치 확대 모달 표시
+   */
+  showZoomedPatch(layerData, coord) {
+    const modal = document.getElementById("patchZoomModal");
+    const title = document.getElementById("patchZoomTitle");
+    const zoomCanvas = document.getElementById("patchZoomCanvas");
+
+    // 모달 제목 설정
+    title.textContent = `${layerData.label} - ${coord} (5x Zoom)`;
+
+    // 원본 캔버스에서 5배 확대된 캔버스 생성
+    const originalCanvas = layerData.originalCanvas || layerData.canvas;
+
+    const targetWidth = 1000; // 요청된 가로 크기
+    const scaleFactor = targetWidth / 300;
+    // 비율을 고정하여 높이 계산
+    const aspectRatio = originalCanvas.height / originalCanvas.width;
+    const targetHeight = targetWidth * aspectRatio;
+
+    // 확대 캔버스 설정
+    zoomCanvas.width = targetWidth;
+    zoomCanvas.height = targetHeight;
+    const zoomCtx = zoomCanvas.getContext("2d");
+
+    // 원본 이미지를 5배 확대하여 그리기
+    zoomCtx.imageSmoothingEnabled = false; // 픽셀 정확도를 위해 스무딩 비활성화;
+    zoomCtx.drawImage(
+      originalCanvas,
+      0,
+      0,
+      originalCanvas.width,
+      originalCanvas.height,
+      0,
+      0,
+      targetWidth,
+      targetHeight
+    );
+
+    // void 이벤트 적용
+    const imageData = zoomCtx.getImageData(
+      0,
+      0,
+      zoomCanvas.width,
+      +zoomCanvas.height
+    );
+
+    this.attachVoidEvents(zoomCanvas, layerData.label, imageData, scaleFactor);
+
+    // 모달 표시
+    modal.style.display = "block";
+
+    console.log(`Showing zoomed patch: ${layerData.label} at ${scaleFactor}x 
+           + scale`);
   }
 
   /**
@@ -549,7 +659,7 @@ export class PatchManager {
       this.voidManager.drawVoidsUnified(maskCtx, chipVoids, {
         titleOffset: 0, // void 좌표가 이미 title 영역 포함
         alpha: 1.0,
-        lineDash: []
+        lineDash: [],
       });
     }
     // void가 없으면 타이틀만 있는 빈 캔버스
@@ -613,7 +723,10 @@ export class PatchManager {
     summaryCtx.fillText(label, 6, titleH / 2);
 
     // 통합된 void 수집 함수 사용
-    const typeVoids = this.voidManager.getVoidsByChipType(chipType, this.allPatchPages);
+    const typeVoids = this.voidManager.getVoidsByChipType(
+      chipType,
+      this.allPatchPages
+    );
     console.log(
       `${chipType} type summary: found ${typeVoids.length} voids across ${typeChips.length} chips`
     );
@@ -621,7 +734,7 @@ export class PatchManager {
       this.voidManager.drawVoidsUnified(summaryCtx, typeVoids, {
         titleOffset: 0, // void 좌표가 이미 title 영역 포함
         alpha: 1.0,
-        lineDash: []
+        lineDash: [],
       });
 
       // 통계 정보를 캔버스 맨 아래 별도 영역에 추가
@@ -640,7 +753,7 @@ export class PatchManager {
       summaryCtx.fillText(
         `${typeVoids.length} voids in ${typeChips.length} chips`,
         patchSize / 2,
-        statsY + statsH / 2 + 5
+        statsY + statsH / 5
       );
     } else {
       // void가 없는 경우에도 통계 영역 추가
@@ -658,7 +771,7 @@ export class PatchManager {
       summaryCtx.fillText(
         `No voids in ${typeChips.length} chips`,
         patchSize / 2,
-        statsY + statsH / 2 + 5
+        statsY + statsH / 5
       );
     }
 
