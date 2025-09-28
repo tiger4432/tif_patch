@@ -196,8 +196,8 @@ export class PatchManager {
       if (!this.app.voidMarkMode) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width / scaleFactor;
-      const scaleY = canvas.height / rect.height / scaleFactor;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
 
       const sx = (e.clientX - rect.left) * scaleX;
       const sy = (e.clientY - rect.top) * scaleY;
@@ -270,10 +270,10 @@ export class PatchManager {
           newVoid = this.voidManager.createVoid(
             patchLabel,
             type,
-            centerX,
-            centerY,
-            radiusX,
-            radiusY
+            centerX / scaleFactor,
+            centerY / scaleFactor,
+            radiusX / scaleFactor,
+            radiusY / scaleFactor
           );
         }
 

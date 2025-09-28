@@ -42,7 +42,7 @@ export const CONFIG = {
   MAX_DISPLAY_SIZE: 1024,
   SYNC_THROTTLE_MS: 100,
   DISTANCE_THRESHOLD: 30,
-  TOLERANCE: 8,
+  TOLERANCE: 4,
   // 압축 설정
   COMPRESSION: {
     SMALL_FILE_MAX: 2048, // 작은 파일용 최대 크기
