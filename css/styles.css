@@ -1,0 +1,311 @@
+/* SAT - Semiconductor Analysis Tool Styles */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  display: flex;
+  height: 100vh;
+  background: #f8f9fa;
+  color: #2c3e50;
+}
+
+/* Layout */
+#left {
+  width: 22%;
+  height: 100vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border-right: 1px solid #dee2e6;
+  padding: 12px;
+  box-shadow: 1px 0 3px rgba(0, 0, 0, 0.1);
+}
+
+#center {
+  width: 56%;
+  height: 100vh;
+  overflow: auto;
+  background: #f1f3f4;
+  border-right: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#right {
+  width: 22%;
+  height: 100vh;
+  overflow-y: auto;
+  background: #ffffff;
+  box-shadow: -1px 0 3px rgba(0, 0, 0, 0.1);
+}
+
+#patches {
+  margin: 12px;
+}
+
+/* Canvas */
+canvas {
+  max-width: 95%;
+  max-height: 95%;
+  cursor: grab;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+canvas.dragging {
+  cursor: grabbing;
+}
+
+/* Form Elements */
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 6px 10px;
+  margin: 3px 0;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  color: #495057;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
+}
+
+textarea {
+  height: 80px;
+  resize: vertical;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Buttons */
+button {
+  padding: 6px 12px;
+  margin: 3px 2px;
+  border: 1px solid #007bff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  background: #007bff;
+  color: white;
+}
+
+button:hover {
+  background: #0056b3;
+  border-color: #0056b3;
+}
+
+button:active {
+  background: #004085;
+  border-color: #004085;
+}
+
+label {
+  display: block;
+  margin: 8px 0 3px 0;
+  font-weight: 500;
+  color: #495057;
+  font-size: 13px;
+}
+
+/* Cards */
+.coord-card {
+  border: 1px solid #bdc3c7;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.coord-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.coord-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 6px;
+}
+
+/* Layers */
+.layers-wrap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.layer-item {
+  text-align: center;
+  background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+  padding: 12px;
+  border-radius: 10px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.layer-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(52, 73, 94, 0.4);
+  border-color: #3498db;
+}
+
+.layer-label {
+  font-size: 12px;
+  color: #bdc3c7;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.layer-item canvas {
+  max-width: 100%;
+  border: 2px solid #7f8c8d;
+  border-radius: 6px;
+  transition: border-color 0.3s ease;
+}
+
+.layer-item:hover canvas {
+  border-color: #3498db;
+}
+
+/* Mode States */
+.mode-on {
+  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%) !important;
+  color: white !important;
+  font-weight: bold;
+  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Controls */
+#topControls {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  padding: 12px;
+  background: rgb(255, 255, 255);
+}
+
+#voidControls {
+  padding: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: rgba(52, 73, 94);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+#voidControls button {
+  padding: 8px 16px;
+  border: 2px solid #7f8c8d;
+  background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+#voidControls button:hover {
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  border-color: #3498db;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+}
+
+#voidControls select {
+  padding: 6px;
+  background: #333;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+}
+
+/* Panels */
+.info-panel {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0;
+}
+
+.highlight-box {
+  background: #e9ecef;
+  border: 1px solid #adb5bd;
+  border-radius: 6px;
+  padding: 10px;
+  margin: 6px 0;
+}
+
+/* Headers */
+h3 {
+  color: #343a40;
+  margin: 16px 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #dee2e6;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* JSON Display */
+#voidJson {
+  width: 100%;
+  height: 120px;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  background: #2c3e50;
+  color: #ecf0f1;
+  border: 1px solid #34495e;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+/* Shape Buttons */
+.shape-btn {
+  padding: 4px 8px;
+  border: 1px solid #bdc3c7;
+  background: #ecf0f1;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.shape-btn:hover {
+  background: #d5dbdb;
+}
+
+.shape-btn.active {
+  background: #3498db;
+  color: white;
+  border-color: #2980b9;
+}

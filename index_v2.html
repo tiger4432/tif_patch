@@ -3,290 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <title>Wafer Grid Tool - V2</title>
+    <link rel="stylesheet" href="css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist/geotiff.bundle.js"></script>
-    <style>
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        display: flex;
-        height: 100vh;
-        background: #f8f9fa;
-        color: #2c3e50;
-      }
-
-      #left {
-        width: 22%;
-        height: 100vh;
-        overflow-y: auto;
-        background: #ffffff;
-        border-right: 1px solid #dee2e6;
-        padding: 12px;
-        box-shadow: 1px 0 3px rgba(0, 0, 0, 0.1);
-      }
-
-      #center {
-        width: 56%;
-        height: 100vh;
-        overflow: auto;
-        background: #f1f3f4;
-        border-right: 1px solid #dee2e6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 16px;
-      }
-
-      #right {
-        width: 22%;
-        height: 100vh;
-        overflow-y: auto;
-        background: #ffffff;
-        box-shadow: -1px 0 3px rgba(0, 0, 0, 0.1);
-      }
-
-      #patches {
-        margin: 12px;
-      }
-      canvas {
-        max-width: 95%;
-        max-height: 95%;
-        cursor: grab;
-        border-radius: 8px;
-        object-fit: contain;
-      }
-      canvas.dragging {
-        cursor: grabbing;
-      }
-
-      /* Form Elements */
-      input[type="text"],
-      input[type="number"],
-      select,
-      textarea {
-        width: 100%;
-        padding: 6px 10px;
-        margin: 3px 0;
-        border: 1px solid #ced4da;
-        border-radius: 4px;
-        font-size: 13px;
-        transition: all 0.2s ease;
-        background: #ffffff;
-        color: #495057;
-      }
-
-      input[type="text"]:focus,
-      input[type="number"]:focus,
-      select:focus,
-      textarea:focus {
-        outline: none;
-        border-color: #007bff;
-        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
-      }
-
-      textarea {
-        height: 80px;
-        resize: vertical;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      }
-
-      button {
-        padding: 6px 12px;
-        margin: 3px 2px;
-        border: 1px solid #007bff;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-        transition: all 0.2s ease;
-        background: #007bff;
-        color: white;
-      }
-
-      button:hover {
-        background: #0056b3;
-        border-color: #0056b3;
-      }
-
-      button:active {
-        background: #004085;
-        border-color: #004085;
-      }
-
-      label {
-        display: block;
-        margin: 8px 0 3px 0;
-        font-weight: 500;
-        color: #495057;
-        font-size: 13px;
-      }
-      .coord-card {
-        border: 1px solid #bdc3c7;
-        border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 16px;
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-      }
-
-      .coord-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-      }
-
-      .coord-title {
-        margin: 0 0 10px;
-        font-size: 16px;
-        font-weight: 600;
-        color: #2c3e50;
-        border-bottom: 2px solid #667eea;
-        padding-bottom: 6px;
-      }
-
-      .layers-wrap {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, 1fr);
-        gap: 12px;
-        padding: 8px 0;
-      }
-
-      .layer-item {
-        text-align: center;
-        background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
-        padding: 12px;
-        border-radius: 10px;
-        transition: all 0.3s ease;
-        cursor: pointer;
-        border: 2px solid transparent;
-      }
-
-      .layer-item:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 20px rgba(52, 73, 94, 0.4);
-        border-color: #3498db;
-      }
-
-      .layer-label {
-        font-size: 12px;
-        color: #bdc3c7;
-        margin-bottom: 8px;
-        font-weight: 500;
-      }
-
-      .layer-item canvas {
-        max-width: 100%;
-        border: 2px solid #7f8c8d;
-        border-radius: 6px;
-        transition: border-color 0.3s ease;
-      }
-
-      .layer-item:hover canvas {
-        border-color: #3498db;
-      }
-      .mode-on {
-        background: linear-gradient(
-          135deg,
-          #27ae60 0%,
-          #2ecc71 100%
-        ) !important;
-        color: white !important;
-        font-weight: bold;
-        box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4) !important;
-        transform: translateY(-1px) !important;
-      }
-
-      #topControls {
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-        padding: 12px;
-        background: rgb(255, 255, 255);
-      }
-
-      #voidControls {
-        padding: 12px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
-        background: rgba(52, 73, 94);
-        border-radius: 8px;
-        margin-bottom: 8px;
-      }
-
-      #voidControls button {
-        padding: 8px 16px;
-        border: 2px solid #7f8c8d;
-        background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
-        color: #fff;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-weight: 500;
-        font-size: 13px;
-      }
-
-      #voidControls button:hover {
-        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-        border-color: #3498db;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
-      }
-
-      /* Special styling for important buttons */
-      .info-panel {
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 6px;
-        padding: 12px;
-        margin: 8px 0;
-      }
-
-      .highlight-box {
-        background: #e9ecef;
-        border: 1px solid #adb5bd;
-        border-radius: 6px;
-        padding: 10px;
-        margin: 6px 0;
-      }
-
-      /* Headers and Sections */
-      h3 {
-        color: #343a40;
-        margin: 16px 0 10px 0;
-        padding-bottom: 6px;
-        border-bottom: 1px solid #dee2e6;
-        font-weight: 600;
-        font-size: 15px;
-      }
-      #voidControls select {
-        padding: 6px;
-        background: #333;
-        color: #fff;
-        border: 1px solid #555;
-        border-radius: 4px;
-      }
-
-      #voidJson {
-        width: 100%;
-        height: 120px;
-        font-family: "Courier New", monospace;
-        font-size: 10px;
-        background: #2c3e50;
-        color: #ecf0f1;
-        border: 1px solid #34495e;
-        border-radius: 4px;
-        padding: 8px;
-        margin-bottom: 8px;
-        resize: vertical;
-      }
-    </style>
+    <script type="module">
+      import { ProgressManager } from './js/progressManager.js';
+      import { FileSaveManager } from './js/fileSaveManager.js';
+      window.ProgressManager = ProgressManager;
+      window.FileSaveManager = FileSaveManager;
+    </script>
   </head>
   <body>
     <div id="left">
@@ -428,6 +154,7 @@
 
       <button id="extractBtn">Extract Patches</button>
       <button id="downloadZipBtn">Download All Patches (ZIP)</button>
+      <button id="downloadFolderBtn">Download as Folder Structure</button>
       <label for="zipFileName">Save as:</label>
       <input
         type="text"
@@ -527,6 +254,10 @@
           this.selectedVoid = null;
           this.resizeMode = false;
 
+          // 모듈 매니저 초기화
+          this.progressManager = new window.ProgressManager();
+          this.fileSaveManager = new window.FileSaveManager(this, this.progressManager);
+
           // 그리드 프리뷰 초기화
           this.gridPreviewCanvas = document.getElementById("gridPreview");
           this.gridPreviewCtx = this.gridPreviewCanvas.getContext("2d");
@@ -536,29 +267,73 @@
           this.setupVoidJsonSync();
         }
 
-        // Progress Bar Methods
+        // Progress Bar Methods - 델리게이트 메서드들 (ProgressManager 사용)
         showProgress() {
-          const container = document.getElementById("progressContainer");
-          container.style.display = "block";
-          this.updateProgress(0, "Initializing TIFF loading...", "");
+          this.progressManager.showProgress();
         }
 
         hideProgress() {
-          const container = document.getElementById("progressContainer");
-          container.style.display = "none";
+          this.progressManager.hideProgress();
+        }
+
+        showFolderSaveProgress() {
+          this.progressManager.showFolderSaveProgress();
+        }
+
+        hideFolderSaveProgress() {
+          this.progressManager.hideFolderSaveProgress();
+        }
+
+        updateFolderSaveProgress(current, total, text = "", details = "") {
+          this.progressManager.updateFolderSaveProgress(current, total, text, details);
         }
 
         updateProgress(percentage, text = "", details = "") {
-          const progressBar = document.getElementById("progressBar");
-          const progressText = document.getElementById("progressText");
-          const progressDetails = document.getElementById("progressDetails");
+          this.progressManager.updateProgress(percentage, text, details);
+        }
 
-          progressBar.style.width = `${Math.min(
-            100,
-            Math.max(0, percentage)
-          )}%`;
-          if (text) progressText.textContent = text;
-          if (details) progressDetails.textContent = details;
+        showSuccess(message, duration = 2000) {
+          this.progressManager.showSuccess(message, duration);
+        }
+
+        showError(message, duration = 3000) {
+          this.progressManager.showError(message, duration);
+        }
+
+        showWaiting(message) {
+          this.progressManager.showWaiting(message);
+        }
+
+        downloadVoids() {
+          const voidData = this.voidManager.exportVoids();
+          if (!voidData.length) {
+            alert("No voids recorded.");
+            return;
+          }
+
+          // 메타데이터와 함께 void 데이터 구성
+          const voidExportData = {
+            metadata: this.getGridMetadata(),
+            voidRecords: voidData,
+            statistics: this.voidManager.getStats(),
+            exportInfo: {
+              totalVoids: voidData.length,
+              exportDate: new Date().toISOString(),
+              syncModeEnabled: this.voidManager.syncMode,
+            },
+          };
+
+          const blob = new Blob([JSON.stringify(voidExportData, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+
+          const fileName = this.generateFileName("voids", ".json");
+          a.download = fileName;
+          a.click();
+          URL.revokeObjectURL(url);
         }
 
         initializeUI() {
@@ -792,7 +567,9 @@
           document.getElementById("extractBtn").onclick = async () =>
             await this.patchManager.extractPatches();
           document.getElementById("downloadZipBtn").onclick = () =>
-            this.downloadZip();
+            this.fileSaveManager.downloadZip();
+          document.getElementById("downloadFolderBtn").onclick = () =>
+            this.fileSaveManager.downloadAsFolderStructure();
           document.getElementById("downloadVoids").onclick = () =>
             this.downloadVoids();
           document.getElementById("voidStats").onclick = () =>
@@ -1091,7 +868,8 @@
         drawCurrentPatchIndicator(cellW, cellH, scaledOriginX, scaledOriginY) {
           if (this.patchManager.allPatchPages.length === 0) return;
 
-          const currentPatch = this.patchManager.allPatchPages[this.patchManager.currentPatchPage];
+          const currentPatch =
+            this.patchManager.allPatchPages[this.patchManager.currentPatchPage];
           if (!currentPatch) return;
 
           // 현재 패치의 좌표 파싱
@@ -1626,39 +1404,35 @@
           await this.drawPage();
         }
 
-        downloadZip() {
-          if (!this.patchManager.allPatchCanvases || !this.patchManager.allPatchCanvases.length) {
-            alert("먼저 Extract Patches를 실행하세요.");
-            return;
-          }
 
-          const zip = new JSZip();
 
-          // 메타데이터 추가
-          const metadata = this.getGridMetadata();
-          zip.file("metadata.json", JSON.stringify(metadata, null, 2));
 
-          // 좌표 정보 추가
-          const coordinateInfo = {
-            coordinates: this.csvRows,
-            chipPoints: this.chipPoints,
-          };
-          zip.file("coordinates.json", JSON.stringify(coordinateInfo, null, 2));
+        /**
+         * 파일/폴더명에서 허용되지 않는 문자 제거
+         */
+        sanitizeFileName(fileName) {
+          // Windows/Mac/Linux에서 허용되지 않는 문자들 제거
+          return fileName
+            .replace(/[<>:"\/\\|?*\x00-\x1f]/g, '_')  // 특수문자를 '_'로 대체
+            .replace(/\.$/, '_')  // 마지막 점 제거
+            .replace(/\s+/g, '_')  // 공백을 '_'로 대체
+            .substring(0, 255);  // 길이 제한
+        }
 
-          // voids 데이터 추가
-          const voidData = this.voidManager.exportVoids();
-          zip.file("voids.json", JSON.stringify(voidData, null, 2));
 
-          // README 파일 추가
-          const readmeContent = `# Wafer Patch Extraction Data
-          
+        /**
+         * README 내용 생성
+         */
+        generateReadmeContent(metadata) {
+          return `# Wafer Patch Extraction Data
+
 TIFF File: ${metadata.tiffFileName || "Unknown"}
 Extraction Date: ${metadata.timestamp}
 Version: ${metadata.version}
 
 ## Grid Settings
 - Columns: ${metadata.gridSettings.cols}
-- Rows: ${metadata.gridSettings.rows}  
+- Rows: ${metadata.gridSettings.rows}
 - Cell Width: ${metadata.gridSettings.cellW}px
 - Cell Height: ${metadata.gridSettings.cellH}px
 
@@ -1679,125 +1453,17 @@ Version: ${metadata.version}
 - Total Patches: ${metadata.extractionInfo.totalPatches}
 - Patch Size: ${metadata.extractionInfo.patchSize}px
 
-## Structure
-- with_voids/[type]/layer_[XX]/[patch_name].png (patches containing voids)
+## Folder Structure
 - no_voids/[type]/layer_[XX]/[patch_name].png (patches without voids)
+- split/[type]/layer_[XX]/[patch_name].png (patches with void markings)
 - merge/[type]/[patch_name]_merge.png (merged mask layers)
+- summary/[type]_summary.png (type-based void pattern summaries)
 - metadata.json: Grid and extraction settings
 - coordinates.json: Chip coordinate data
 - voids.json: Void detection data
 `;
-          zip.file("README.txt", readmeContent);
-
-          // 패치 이미지들 구분해서 추가 (void가 있는 것과 없는 것 분리)
-          const patchesWithVoids = new Set();
-          const patchesWithoutVoids = new Set();
-
-          // void가 있는 패치들 식별
-          Object.keys(voidData).forEach((patchLabel) => {
-            if (voidData[patchLabel] && voidData[patchLabel].length > 0) {
-              patchesWithVoids.add(patchLabel);
-            }
-          });
-
-          // 모든 패치 분류 및 저장
-          this.patchManager.allPatchCanvases.forEach((p) => {
-            const hasVoids = patchesWithVoids.has(p.label);
-
-            // 1. no_voids 폴더: void가 없는 칩들의 원본 패치
-            if (!hasVoids) {
-              const folderPath = `no_voids/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
-              const folder = zip.folder(folderPath);
-              const originalCanvas = p.originalCanvas || p.canvas;
-              const dataURL = originalCanvas.toDataURL("image/png").split(",")[1];
-              folder.file(`${p.label}.png`, dataURL, { base64: true });
-              patchesWithoutVoids.add(p.label);
-            }
-
-            // 2. split 폴더: 모든 패치 (void 마킹된 버전 또는 빈 마스크)
-            const splitFolderPath = `split/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
-            const splitFolder = zip.folder(splitFolderPath);
-            const splitDataURL = p.canvas.toDataURL("image/png").split(",")[1];
-            splitFolder.file(`${p.label}.png`, splitDataURL, { base64: true });
-
-            if (hasVoids) {
-              patchesWithVoids.add(p.label);
-            }
-          });
-
-          // split 폴더에 merge mask 추가 (모든 칩에 대해, void 없으면 빈 마스크)
-          const processedChips = new Set();
-          this.patchManager.allPatchPages.forEach((patchPage) => {
-            const chipCoord = patchPage.coord;
-            const chipType = patchPage.type;
-
-            if (processedChips.has(chipCoord)) return;
-            processedChips.add(chipCoord);
-
-            // 해당 칩에 void가 있는지 확인
-            const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
-            if (!match) return;
-
-            const chipX = parseInt(match[1]);
-            const chipY = parseInt(match[2]);
-
-            // 모든 칩에 대해 merge mask 생성 (void 없으면 빈 마스크)
-            const voidMaskCanvas = this.patchManager.createVoidMaskCanvas(chipCoord, chipType, true);
-            if (voidMaskCanvas) {
-              const safeFolderName = chipType.replace(/[^a-zA-Z0-9_-]/g, "_");
-              const folderPath = `split/${safeFolderName}/merge`;
-              const folder = zip.folder(folderPath);
-              const label = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L00_LEG:${chipType}`;
-              const dataURL = voidMaskCanvas.toDataURL("image/png").split(",")[1];
-              folder.file(`${label}.png`, dataURL, { base64: true });
-            }
-          });
-
-          // summary 폴더에 type별 통합 void 마스크 추가
-          console.log("Creating summary masks...");
-          console.log(`Total voids in system: ${this.voidManager.voids.size}`);
-          const summaryMasks = this.patchManager.createAllTypeSummaryMasks();
-          console.log(`Summary masks created: ${summaryMasks.size} types`, Array.from(summaryMasks.keys()));
-
-          if (summaryMasks.size > 0) {
-            summaryMasks.forEach((summaryCanvas, chipType) => {
-              const summaryFolder = zip.folder("summary");
-              const safeFileName = chipType.replace(/[^a-zA-Z0-9_-]/g, "_");
-              const summaryLabel = `${safeFileName}_summary_all_voids`;
-              const summaryDataURL = summaryCanvas.toDataURL("image/png").split(",")[1];
-              summaryFolder.file(`${summaryLabel}.png`, summaryDataURL, { base64: true });
-              console.log(`Added summary mask for type: ${chipType} as ${summaryLabel}.png`);
-            });
-          } else {
-            console.warn("No summary masks created - no types found or no voids detected");
-          }
-
-          zip.generateAsync({ type: "blob" }).then((content) => {
-            // 사용자 지정 파일명 또는 기본값 사용
-            const userFileName = document
-              .getElementById("zipFileName")
-              .value.trim();
-            let fileName;
-            if (userFileName) {
-              fileName = userFileName.endsWith(".zip")
-                ? userFileName
-                : userFileName + ".zip";
-            } else {
-              fileName = this.generateFileName("patches", ".zip");
-            }
-
-            saveAs(content, fileName);
-            console.log(`Downloaded patches ZIP: ${fileName}`);
-            console.log("ZIP contents:", {
-              patchesWithVoids: patchesWithVoids.size,
-              patchesWithoutVoids: patchesWithoutVoids.size,
-              totalPatches: this.patchManager.allPatchCanvases.length,
-              metadata: "included",
-              voidData: "included",
-              coordinates: this.csvRows.length,
-            });
-          });
         }
+
 
         showTypeSummary() {
           if (!this.patchManager.allPatchPages.length) {
@@ -1809,7 +1475,9 @@ Version: ${metadata.version}
           const summaryMasks = this.patchManager.createAllTypeSummaryMasks();
 
           if (summaryMasks.size === 0) {
-            alert("생성할 summary가 없습니다. void를 마킹한 후 다시 시도하세요.");
+            alert(
+              "생성할 summary가 없습니다. void를 마킹한 후 다시 시도하세요."
+            );
             return;
           }
 
@@ -1835,49 +1503,17 @@ Version: ${metadata.version}
           wrap.appendChild(layersWrap);
           patchesDiv.appendChild(wrap);
 
-          document.getElementById("pageInfo").textContent = `Type Summary (${summaryMasks.size} types)`;
+          document.getElementById(
+            "pageInfo"
+          ).textContent = `Type Summary (${summaryMasks.size} types)`;
 
-          console.log(`Displayed summary for types: ${Array.from(summaryMasks.keys()).join(', ')}`);
+          console.log(
+            `Displayed summary for types: ${Array.from(
+              summaryMasks.keys()
+            ).join(", ")}`
+          );
         }
 
-        downloadVoids() {
-          const voidData = this.voidManager.exportVoids();
-          if (!voidData.length) {
-            alert("No voids recorded.");
-            return;
-          }
-
-          // 메타데이터와 함께 void 데이터 구성
-          const voidExportData = {
-            metadata: this.getGridMetadata(),
-            voidRecords: voidData,
-            statistics: this.voidManager.getStats(),
-            exportInfo: {
-              totalVoids: voidData.length,
-              exportDate: new Date().toISOString(),
-              syncModeEnabled: this.voidManager.syncMode,
-            },
-          };
-
-          const blob = new Blob([JSON.stringify(voidExportData, null, 2)], {
-            type: "application/json",
-          });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-
-          const fileName = this.generateFileName("voids", ".json");
-          a.download = fileName;
-          a.click();
-          URL.revokeObjectURL(url);
-
-          console.log(`Downloaded void JSON: ${fileName}`);
-          console.log("Void export data:", {
-            voids: voidData.length,
-            metadata: "included",
-            statistics: voidExportData.statistics,
-          });
-        }
 
         showVoidStats() {
           const stats = this.voidManager.getStats();
@@ -2141,7 +1777,9 @@ Check console for details.`);
           // void 마스크 그리기 (void가 있는 경우에만)
           if (chipVoids.length > 0) {
             // 올바른 patchLabel 형태로 생성: X05_Y07_L01_LEG:type
-            const properPatchLabel = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L01_LEG:${type}`;
+            const properPatchLabel = `X${padCoord(chipX)}_Y${padCoord(
+              chipY
+            )}_L01_LEG:${type}`;
             // mergeMode = true, titleOffset = titleH 사용
             this.voidManager.drawVoids(maskCtx, properPatchLabel, true, titleH);
           }
@@ -2250,7 +1888,8 @@ Check console for details.`);
             extractionInfo: {
               totalPages: this.pages.length,
               totalCoordinates: this.csvRows.length,
-              totalPatches: this.patchManager.allPatchPages.length * this.pages.length,
+              totalPatches:
+                this.patchManager.allPatchPages.length * this.pages.length,
               patchSize: 300, // 고정 패치 크기
             },
             timestamp: new Date().toISOString(),
