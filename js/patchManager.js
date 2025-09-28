@@ -94,12 +94,7 @@ export class PatchManager {
         tmp.width = c.width;
         tmp.height = c.height;
         tmp.getContext("2d").putImageData(subImg, 0, 0);
-        ImageProcessor.enhanceToTarget(
-          tmp.getContext("2d"),
-          tMean,
-          tStd,
-          pad
-        );
+        ImageProcessor.enhanceToTarget(tmp.getContext("2d"), tMean, tStd, pad);
         ctx.putImageData(
           tmp.getContext("2d").getImageData(0, 0, c.width, c.height),
           0,
@@ -115,8 +110,19 @@ export class PatchManager {
         originalCanvas.height = c.height;
         originalCanvas.getContext("2d").putImageData(enhancedImageData, 0, 0);
 
-        this.attachVoidEvents(c, label, enhancedImageData);
+        // Chip bbox 후보 추출
+        if (pageIdx === 0) {
+          const bboxList = ImageProcessor.getBboxList(originalCanvas);
+          console.log(label, " : bbox detection :", bboxList);
+          let temp_ctx = c.getContext("2d");
+          temp_ctx.strokeStyle = "lime";
+          temp_ctx.lineWidth = 3;
+          bboxList.forEach(([x, y, w, h]) => {
+            this.voidManager.createVoid(label, "bbox", x, y, w, h);
+          });
+        }
 
+        this.attachVoidEvents(c, label, enhancedImageData);
         pageData.layers.push({
           canvas: c,
           originalCanvas: originalCanvas, // 원본 캔버스 추가
@@ -169,7 +175,12 @@ export class PatchManager {
 
     const repaint = () => {
       ctx.putImageData(imageData, 0, 0);
-      this.voidManager.drawVoids(ctx, patchLabel);
+      const realChipSize = parseFloat(document.getElementById("realChipSize")?.value || 1000);
+      const canvasChipSize = parseFloat(document.getElementById("canvasChipSize")?.value || 100);
+      this.voidManager.drawVoids(ctx, patchLabel, {
+        realChipSize,
+        canvasChipSize
+      });
     };
 
     // 보이드 마킹
@@ -220,8 +231,7 @@ export class PatchManager {
         document.removeEventListener("mouseup", up);
         const ex = (ue.clientX - rect.left) * scaleX;
         const ey = (ue.clientY - rect.top) * scaleY;
-        const type =
-          document.getElementById("voidTypeSelect").value || "void";
+        const type = document.getElementById("voidTypeSelect").value || "void";
 
         let newVoid;
 
@@ -287,13 +297,7 @@ export class PatchManager {
         `Attempting to delete void at (${x},${y},${layer}) click:(${clickX},${clickY})`
       );
 
-      const deleted = this.voidManager.deleteVoid(
-        x,
-        y,
-        layer,
-        clickX,
-        clickY
-      );
+      const deleted = this.voidManager.deleteVoid(x, y, layer, clickX, clickY);
 
       console.log(`Delete result: ${deleted}`);
 
@@ -390,8 +394,12 @@ export class PatchManager {
     )
       return;
 
+    // 실제 크기 설정 가져오기
+    const realChipSize = parseFloat(document.getElementById("realChipSize")?.value || 1000);
+    const canvasChipSize = parseFloat(document.getElementById("canvasChipSize")?.value || 100);
+
     // 모든 패치 캔버스 업데이트 (저장용 + UI용 통일)
-    this.updateAllPatchCanvases();
+    this.updateAllPatchCanvases(realChipSize, canvasChipSize);
 
     // void JSON 업데이트
     this.app.updateVoidJsonDisplay();
@@ -403,13 +411,16 @@ export class PatchManager {
   /**
    * 모든 패치 캔버스를 최신 void 상태로 업데이트 (UI와 저장용 통일)
    */
-  updateAllPatchCanvases() {
+  updateAllPatchCanvases(realChipSize = 1000, canvasChipSize = 100) {
     // 현재 표시 중인 페이지뿐만 아니라 모든 페이지 업데이트
     this.allPatchPages.forEach((page) => {
       page.layers.forEach((layerInfo) => {
         const ctx = layerInfo.canvas.getContext("2d");
         ctx.putImageData(layerInfo.imageData, 0, 0);
-        this.voidManager.drawVoids(ctx, layerInfo.label);
+        this.voidManager.drawVoids(ctx, layerInfo.label, {
+          realChipSize,
+          canvasChipSize
+        });
       });
     });
 
@@ -418,14 +429,17 @@ export class PatchManager {
       window.allPatchCanvases.forEach((patchInfo) => {
         const ctx = patchInfo.canvas.getContext("2d");
         // 원본 이미지 데이터로 복원 후 void 다시 그리기
-        const page = this.allPatchPages.find(p =>
-          p.layers.some(l => l.label === patchInfo.label)
+        const page = this.allPatchPages.find((p) =>
+          p.layers.some((l) => l.label === patchInfo.label)
         );
         if (page) {
-          const layer = page.layers.find(l => l.label === patchInfo.label);
+          const layer = page.layers.find((l) => l.label === patchInfo.label);
           if (layer) {
             ctx.putImageData(layer.imageData, 0, 0);
-            this.voidManager.drawVoids(ctx, patchInfo.label);
+            this.voidManager.drawVoids(ctx, patchInfo.label, {
+              realChipSize,
+              canvasChipSize
+            });
           }
         }
       });
@@ -438,8 +452,7 @@ export class PatchManager {
   async showPatchPage(idx) {
     if (!this.allPatchPages.length) return;
     if (idx < 0) idx = 0;
-    if (idx >= this.allPatchPages.length)
-      idx = this.allPatchPages.length - 1;
+    if (idx >= this.allPatchPages.length) idx = this.allPatchPages.length - 1;
     this.currentPatchPage = idx;
 
     const page = this.allPatchPages[idx];
@@ -522,9 +535,7 @@ export class PatchManager {
     maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
 
     // 타이틀 영역 (검은 배경)
-    const label = `X${padCoord(chipX)}_Y${padCoord(
-      chipY
-    )}_L00_LEG:${type}`;
+    const label = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L00_LEG:${type}`;
     maskCtx.fillStyle = "#000";
     maskCtx.fillRect(0, 0, patchSize, titleH);
     maskCtx.fillStyle = "#fff";
@@ -534,10 +545,12 @@ export class PatchManager {
 
     // void 마스크 그리기 (void가 있는 경우에만)
     if (chipVoids.length > 0) {
-      // 올바른 patchLabel 형태로 생성: X05_Y07_L01_LEG:type
-      const properPatchLabel = `X${padCoord(chipX)}_Y${padCoord(chipY)}_L01_LEG:${type}`;
-      // mergeMode = true, titleOffset = 0 (void 좌표가 이미 타이틀 영역 포함)
-      this.voidManager.drawVoids(maskCtx, properPatchLabel, true, 0);
+      // 통합된 void 그리기 함수 사용
+      this.voidManager.drawVoidsUnified(maskCtx, chipVoids, {
+        titleOffset: 0, // void 좌표가 이미 title 영역 포함
+        alpha: 1.0,
+        lineDash: []
+      });
     }
     // void가 없으면 타이틀만 있는 빈 캔버스
 
@@ -549,8 +562,12 @@ export class PatchManager {
    */
   createTypeSummaryMask(chipType) {
     // 해당 타입의 모든 칩들 찾기
-    const typeChips = this.allPatchPages.filter(page => page.type === chipType);
-    console.log(`Creating summary for type ${chipType}: found ${typeChips.length} chips`);
+    const typeChips = this.allPatchPages.filter(
+      (page) => page.type === chipType
+    );
+    console.log(
+      `Creating summary for type ${chipType}: found ${typeChips.length} chips`
+    );
     if (typeChips.length === 0) {
       console.warn(`No chips found for type: ${chipType}`);
       return null;
@@ -559,11 +576,17 @@ export class PatchManager {
     // 첫 번째 칩을 기준으로 캔버스 크기 결정
     const firstChip = typeChips[0];
     console.log(`First chip for type ${chipType}:`, firstChip);
-    console.log(`First chip layers count: ${firstChip.layers ? firstChip.layers.length : 'undefined'}`);
+    console.log(
+      `First chip layers count: ${
+        firstChip.layers ? firstChip.layers.length : "undefined"
+      }`
+    );
 
     const firstLayer = firstChip.layers && firstChip.layers[0];
     if (!firstLayer) {
-      console.warn(`No layers found for chip type ${chipType} - cannot create summary`);
+      console.warn(
+        `No layers found for chip type ${chipType} - cannot create summary`
+      );
       return null;
     }
 
@@ -589,61 +612,16 @@ export class PatchManager {
     summaryCtx.textBaseline = "middle";
     summaryCtx.fillText(label, 6, titleH / 2);
 
-    // 해당 타입의 모든 void들 수집
-    const typeVoids = [];
-    console.log(`Available voids in voidManager: ${this.voidManager.voids.size}`);
-
-    typeChips.forEach(chip => {
-      const match = chip.coord.match(/\((-?\d+),(-?\d+)\)/);
-      if (!match) return;
-
-      const chipX = parseInt(match[1]);
-      const chipY = parseInt(match[2]);
-
-      console.log(`Checking chip at (${chipX},${chipY}) for voids...`);
-
-      // 해당 칩의 모든 void 수집
-      for (const [voidKey, voidData] of this.voidManager.voids.entries()) {
-        if (voidData.x === chipX && voidData.y === chipY) {
-          typeVoids.push(voidData);
-          console.log(`Found void at (${chipX},${chipY}):`, voidData);
-        }
-      }
-    });
-
-    console.log(`${chipType} type summary: found ${typeVoids.length} voids across ${typeChips.length} chips`);
-
-    // 모든 void들을 summary 캔버스에 그리기
+    // 통합된 void 수집 함수 사용
+    const typeVoids = this.voidManager.getVoidsByChipType(chipType, this.allPatchPages);
+    console.log(
+      `${chipType} type summary: found ${typeVoids.length} voids across ${typeChips.length} chips`
+    );
     if (typeVoids.length > 0) {
-      summaryCtx.lineWidth = 2;
-      summaryCtx.globalAlpha = 1.0;
-      summaryCtx.setLineDash([]);
-
-      typeVoids.forEach((voidData) => {
-        summaryCtx.beginPath();
-        summaryCtx.strokeStyle = VOID_COLORS[voidData.type] || VOID_COLORS.default;
-
-        if (voidData.type === "bbox") {
-          // bbox는 사각형으로 그리기
-          summaryCtx.strokeRect(
-            voidData.centerX,
-            voidData.centerY,
-            voidData.radiusX,
-            voidData.radiusY
-          );
-        } else {
-          // 일반 void 타입이면 타원 그리기
-          summaryCtx.ellipse(
-            voidData.centerX,
-            voidData.centerY,
-            voidData.radiusX,
-            voidData.radiusY,
-            0,
-            0,
-            2 * Math.PI
-          );
-          summaryCtx.stroke();
-        }
+      this.voidManager.drawVoidsUnified(summaryCtx, typeVoids, {
+        titleOffset: 0, // void 좌표가 이미 title 영역 포함
+        alpha: 1.0,
+        lineDash: []
       });
 
       // 통계 정보를 캔버스 맨 아래 별도 영역에 추가
@@ -659,7 +637,11 @@ export class PatchManager {
       summaryCtx.fillStyle = "#343a40"; // 진한 회색 텍스트
       summaryCtx.font = "14px sans-serif";
       summaryCtx.textAlign = "center";
-      summaryCtx.fillText(`${typeVoids.length} voids in ${typeChips.length} chips`, patchSize / 2, statsY + statsH / 2 + 5);
+      summaryCtx.fillText(
+        `${typeVoids.length} voids in ${typeChips.length} chips`,
+        patchSize / 2,
+        statsY + statsH / 2 + 5
+      );
     } else {
       // void가 없는 경우에도 통계 영역 추가
       const statsY = summaryCanvas.height - statsH;
@@ -673,7 +655,11 @@ export class PatchManager {
       summaryCtx.fillStyle = "#6c757d"; // 회색 텍스트
       summaryCtx.font = "14px sans-serif";
       summaryCtx.textAlign = "center";
-      summaryCtx.fillText(`No voids in ${typeChips.length} chips`, patchSize / 2, statsY + statsH / 2 + 5);
+      summaryCtx.fillText(
+        `No voids in ${typeChips.length} chips`,
+        patchSize / 2,
+        statsY + statsH / 2 + 5
+      );
     }
 
     return summaryCanvas;
@@ -686,11 +672,11 @@ export class PatchManager {
     const summaryMasks = new Map();
 
     // 모든 고유 타입들 추출
-    const allTypes = [...new Set(this.allPatchPages.map(page => page.type))];
+    const allTypes = [...new Set(this.allPatchPages.map((page) => page.type))];
     console.log(`All patch pages count: ${this.allPatchPages.length}`);
-    console.log(`Found unique types: ${allTypes.join(', ')}`);
+    console.log(`Found unique types: ${allTypes.join(", ")}`);
 
-    allTypes.forEach(chipType => {
+    allTypes.forEach((chipType) => {
       console.log(`Processing type: ${chipType}`);
       const summaryMask = this.createTypeSummaryMask(chipType);
       if (summaryMask) {
@@ -701,7 +687,11 @@ export class PatchManager {
       }
     });
 
-    console.log(`Created summary masks for types: ${Array.from(summaryMasks.keys()).join(', ')}`);
+    console.log(
+      `Created summary masks for types: ${Array.from(summaryMasks.keys()).join(
+        ", "
+      )}`
+    );
     return summaryMasks;
   }
 
@@ -722,9 +712,7 @@ export class PatchManager {
       await this.showPatchPage(patchIndex);
       await this.app.drawPage(); // 초록점 업데이트
 
-      console.log(
-        `Navigated to patch: ${targetCoord} (index: ${patchIndex})`
-      );
+      console.log(`Navigated to patch: ${targetCoord} (index: ${patchIndex})`);
     } else {
       console.log(`No patch found for coordinates: ${targetCoord}`);
     }

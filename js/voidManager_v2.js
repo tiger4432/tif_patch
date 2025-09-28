@@ -1,5 +1,5 @@
 // 새로운 보이드 관리 클래스 (키 기반)
-import { VOID_COLORS, CONFIG } from "./constants.js";
+import { VOID_COLORS, CONFIG, BIN_RULES } from "./constants.js";
 import { parsePatchLabel } from "./utils.js";
 
 export class VoidManagerV2 {
@@ -16,9 +16,7 @@ export class VoidManagerV2 {
     this.syncMode = true;
 
     // bbox 관련 설정
-    this.showBbox = false;
-    this.autoBboxDetection = false;
-    this.bboxes = new Map(); // chipKey -> bbox data
+    this.enableBboxControl = true;
   }
 
   /**
@@ -63,6 +61,10 @@ export class VoidManagerV2 {
       return null;
     }
 
+    if (radiusX == 0 || radiusY == 0) {
+      return null;
+    }
+
     const x = parseInt(match[1], 10);
     const y = parseInt(match[2], 10);
     const voidIndex = this.getNextVoidIndex(x, y, layer);
@@ -89,7 +91,7 @@ export class VoidManagerV2 {
   }
 
   /**
-   * 보이드 삭제 (해당 레이어에서만)
+   * 보이드 삭제 (해당 레이어에서만) - 가장 안쪽(작은) void 우선
    */
   deleteVoid(x, y, layer, centerX, centerY) {
     console.log(
@@ -97,41 +99,26 @@ export class VoidManagerV2 {
     );
     console.log(`Total voids: ${this.voids.size}`);
 
-    const voidsToDelete = [];
+    const candidates = this.findTargetVoids(x, y, layer, centerX, centerY, 0);
 
-    // 해당 위치(x,y,layer)의 모든 보이드 검사
-    for (const [voidKey, voidData] of this.voids.entries()) {
-      console.log(`Checking void: ${voidKey}`, voidData);
+    if (candidates.length > 0) {
+      const smallestVoid = candidates[0]; // 이미 면적 순으로 정렬됨
 
-      if (voidData.x === x && voidData.y === y && voidData.layer === layer) {
-        console.log(`Found matching void at same location: ${voidKey}`);
+      console.log(
+        `Deleting smallest void: ${smallestVoid.voidKey}, area: ${smallestVoid.area}`
+      );
+      this.voids.delete(smallestVoid.voidKey);
 
-        // 클릭한 위치가 보이드 내부인지 확인
-        const dx = (centerX - voidData.centerX) / voidData.radiusX;
-        const dy = (centerY - voidData.centerY) / voidData.radiusY;
-        const inside = dx * dx + dy * dy <= 1;
-
-        console.log(`Distance check: dx=${dx}, dy=${dy}, inside=${inside}`);
-
-        if (inside) {
-          voidsToDelete.push(voidKey);
-          console.log(`Marked for deletion: ${voidKey}`);
-        }
-      }
+      console.log(`Deleted 1 void (smallest)`);
+      return true;
     }
 
-    // 삭제 실행
-    voidsToDelete.forEach((voidKey) => {
-      console.log(`Deleting void: ${voidKey}`);
-      this.voids.delete(voidKey);
-    });
-
-    console.log(`Deleted ${voidsToDelete.length} voids`);
-    return voidsToDelete.length > 0;
+    console.log(`No voids found to delete`);
+    return false;
   }
 
   /**
-   * 보이드 수정 (해당 레이어에서만)
+   * 보이드 수정 (해당 레이어에서만) - 가장 안쪽(작은) void 우선
    */
   updateVoid(
     x,
@@ -144,23 +131,29 @@ export class VoidManagerV2 {
     newRadiusX,
     newRadiusY
   ) {
-    for (const [voidKey, voidData] of this.voids.entries()) {
-      if (voidData.x === x && voidData.y === y && voidData.layer === layer) {
-        // 기존 위치와 일치하는 보이드 찾기
-        const dx = (oldCenterX - voidData.centerX) / voidData.radiusX;
-        const dy = (oldCenterY - voidData.centerY) / voidData.radiusY;
-        const inside = dx * dx + dy * dy <= 1;
+    const candidates = this.findTargetVoids(
+      x,
+      y,
+      layer,
+      oldCenterX,
+      oldCenterY,
+      0
+    );
 
-        if (inside) {
-          voidData.centerX = newCenterX;
-          voidData.centerY = newCenterY;
-          voidData.radiusX = newRadiusX;
-          voidData.radiusY = newRadiusY;
-          console.log(`Updated void: ${voidKey}`, voidData);
-          return voidData;
-        }
-      }
+    if (candidates.length > 0) {
+      const smallestVoid = candidates[0]; // 이미 면적 순으로 정렬됨
+
+      smallestVoid.voidData.centerX = newCenterX;
+      smallestVoid.voidData.centerY = newCenterY;
+      smallestVoid.voidData.radiusX = newRadiusX;
+      smallestVoid.voidData.radiusY = newRadiusY;
+      console.log(
+        `Updated smallest void: ${smallestVoid.voidKey}`,
+        smallestVoid.voidData
+      );
+      return smallestVoid.voidData;
     }
+
     return null;
   }
 
@@ -197,58 +190,112 @@ export class VoidManagerV2 {
   }
 
   /**
-   * 특정 좌표와 클릭 위치로 편집 가능한 보이드 찾기
+   * 특정 좌표와 클릭 위치에서 대상 보이드들 찾기 - 가장 안쪽(작은) void 우선
    */
-  findEditableVoid(x, y, layer, clickX, clickY) {
+  findTargetVoids(x, y, layer, clickX, clickY, tolerance = CONFIG.TOLERANCE) {
+    const candidateVoids = [];
+
     for (const [voidKey, voidData] of this.voids.entries()) {
       if (voidData.x === x && voidData.y === y && voidData.layer === layer) {
-        // 클릭한 위치가 보이드 경계 근처인지 확인
-        const dx = clickX - voidData.centerX;
-        const dy = clickY - voidData.centerY;
-        const angle = Math.atan2(dy, dx);
-        const rB =
-          (voidData.radiusX * voidData.radiusY) /
-          Math.sqrt(
-            (voidData.radiusY * Math.cos(angle)) ** 2 +
-              (voidData.radiusX * Math.sin(angle)) ** 2
-          );
-        const dist = Math.hypot(dx, dy);
+        let inside = false;
 
-        // 보이드 내부 또는 경계 근처
-        if (dist <= rB + CONFIG.TOLERANCE) {
-          return voidData;
+        if (voidData.type === "bbox") {
+          // bbox 타입은 사각형 범위 체크
+          inside =
+            clickX >= voidData.centerX - tolerance &&
+            clickX <= voidData.centerX + voidData.radiusX + tolerance &&
+            clickY >= voidData.centerY - tolerance &&
+            clickY <= voidData.centerY + voidData.radiusY + tolerance;
+        } else {
+          // 일반 void는 타원 범위 체크
+          const dx = (clickX - voidData.centerX) / voidData.radiusX;
+          const dy = (clickY - voidData.centerY) / voidData.radiusY;
+          inside =
+            dx * dx + dy * dy <=
+            1 + tolerance / Math.min(voidData.radiusX, voidData.radiusY);
+        }
+
+        if (inside) {
+          // 보이드 크기 계산 (타원 면적 또는 bbox 면적)
+          const area =
+            voidData.type === "bbox"
+              ? voidData.radiusX * voidData.radiusY
+              : Math.PI * voidData.radiusX * voidData.radiusY;
+
+          candidateVoids.push({ voidKey, voidData, area });
         }
       }
     }
-    return null;
+
+    // 면적 순으로 정렬 (작은 것부터)
+    candidateVoids.sort((a, b) => a.area - b.area);
+    return candidateVoids;
   }
 
   /**
-   * 보이드 그리기
+   * 편집 가능한 보이드 찾기 (가장 안쪽 void 반환)
    */
-  drawVoids(ctx, patchLabel) {
-    const { chipCoord, layer } = parsePatchLabel(patchLabel);
-    const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
-    if (!match) return;
+  findEditableVoid(x, y, layer, clickX, clickY) {
+    const candidates = this.findTargetVoids(x, y, layer, clickX, clickY);
+    return candidates.length > 0 ? candidates[0].voidData : null;
+  }
 
-    const x = parseInt(match[1], 10);
-    const y = parseInt(match[2], 10);
+  /**
+   * 실제 크기 계산 (캔버스 픽셀을 실제 길이로 변환)
+   * @param {number} canvasSize - 캔버스 크기 (픽셀)
+   * @param {number} realChipSize - 실제 칩 크기 (예: μm 단위)
+   * @param {number} canvasChipSize - 캔버스에서 칩 크기 (픽셀)
+   * @returns {number} 실제 크기
+   */
+  calculateRealSize(canvasSize, realChipSize, canvasChipSize) {
+    if (!canvasChipSize || canvasChipSize === 0) return 0;
+    return (canvasSize * realChipSize) / canvasChipSize;
+  }
+
+  /**
+   * 통합된 보이드 그리기 함수
+   * @param {CanvasRenderingContext2D} ctx - 캔버스 컨텍스트
+   * @param {Array} voids - 그릴 보이드들의 배열
+   * @param {Object} options - 그리기 옵션
+   * @param {number} options.titleOffset - Y축 오프셋 (기본값: 0)
+   * @param {boolean} options.solidOnly - 실선만 그리기 (기본값: false)
+   * @param {boolean} options.dottedOnly - 점선만 그리기 (기본값: false)
+   * @param {number} options.alpha - 투명도 (기본값: 1.0)
+   * @param {Array} options.lineDash - 선 스타일 (기본값: [])
+   * @param {number} options.realChipSize - 실제 칩 크기 (μm 단위, 기본값: 1000)
+   * @param {number} options.canvasChipSize - 캔버스에서 칩 크기 (픽셀, 기본값: 100)
+   * @param {boolean} options.showSizes - dela void 크기 표시 여부 (기본값: false)
+   */
+  drawVoidsUnified(ctx, voids, options = {}) {
+    const {
+      titleOffset = 0,
+      solidOnly = false,
+      dottedOnly = false,
+      alpha = 1.0,
+      lineDash = [],
+      realChipSize = 1000, // μm
+      canvasChipSize = 100, // pixels
+      showSizes = false,
+    } = options;
+
+    if (!voids || voids.length === 0) return;
+
+    // 컨텍스트 상태 저장
+    ctx.save();
 
     ctx.lineWidth = 2;
+    ctx.globalAlpha = alpha;
+    ctx.setLineDash(lineDash);
 
-    // 1. 현재 레이어의 보이드들 (실선)
-    const solidVoids = this.getSolidVoids(x, y, layer);
-    solidVoids.forEach((voidData) => {
+    voids.forEach((voidData) => {
       ctx.beginPath();
       ctx.strokeStyle = VOID_COLORS[voidData.type] || VOID_COLORS.default;
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1.0;
 
       if (voidData.type === "bbox") {
-        // bbox 타입이면 사각형 그리기 (centerX, centerY는 좌상단 좌표, radiusX, radiusY는 너비, 높이)
+        // bbox 타입이면 사각형 그리기
         ctx.strokeRect(
           voidData.centerX,
-          voidData.centerY,
+          voidData.centerY + titleOffset,
           voidData.radiusX,
           voidData.radiusY
         );
@@ -256,52 +303,110 @@ export class VoidManagerV2 {
         // 일반 void 타입이면 타원 그리기
         ctx.ellipse(
           voidData.centerX,
-          voidData.centerY,
+          voidData.centerY + titleOffset,
           voidData.radiusX,
           voidData.radiusY,
           0,
           0,
           2 * Math.PI
         );
-        ctx.stroke();
+      }
+      ctx.stroke();
+
+      // dela void의 크기 표시
+      if (showSizes && voidData.type === "dela") {
+        ctx.setLineDash([]); // 텍스트는 실선으로
+        ctx.fillStyle = VOID_COLORS[voidData.type] || "#0000ff";
+        ctx.font = "10px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // 실제 크기 계산 (직경 단위)
+        const realDiameterX = this.calculateRealSize(
+          voidData.radiusX * 2,
+          realChipSize,
+          canvasChipSize
+        );
+        const realDiameterY = this.calculateRealSize(
+          voidData.radiusY * 2,
+          realChipSize,
+          canvasChipSize
+        );
+
+        // 크기 텍스트 생성
+        const sizeText = `${realDiameterX.toFixed(1)}×${realDiameterY.toFixed(
+          1
+        )}μm`;
+
+        // 텍스트 위치 (void 중심 아래쪽)
+        const textX = voidData.centerX;
+        const textY = voidData.centerY + titleOffset + voidData.radiusY + 12;
+
+        // 텍스트 배경 (가독성을 위해)
+        const textMetrics = ctx.measureText(sizeText);
+        const textWidth = textMetrics.width;
+        const textHeight = 10;
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+        ctx.fillRect(
+          textX - textWidth / 2 - 2,
+          textY - textHeight / 2 - 1,
+          textWidth + 4,
+          textHeight + 2
+        );
+
+        // 텍스트 그리기
+        ctx.fillStyle = VOID_COLORS[voidData.type] || "#0000ff";
+        ctx.fillText(sizeText, textX, textY);
+
+        ctx.setLineDash(lineDash); // 원래 선 스타일로 복원
       }
     });
 
-    // 2. 다른 레이어의 보이드들 (점선)
+    // 컨텍스트 상태 복원
+    ctx.restore();
+  }
+
+  /**
+   * 보이드 그리기 (패치 뷰용)
+   */
+  drawVoids(ctx, patchLabel, options = {}) {
+    const { chipCoord, layer } = parsePatchLabel(patchLabel);
+    const match = chipCoord.match(/\((-?\d+),(-?\d+)\)/);
+    if (!match) return;
+
+    const x = parseInt(match[1], 10);
+    const y = parseInt(match[2], 10);
+
+    // 기본 옵션 설정
+    const {
+      realChipSize = 1000, // μm
+      canvasChipSize = 100, // pixels (패치 크기)
+      showSizes = true,
+    } = options;
+
+    // 1. 현재 레이어의 보이드들 (실선)
+    const solidVoids = this.getSolidVoids(x, y, layer);
+    this.drawVoidsUnified(ctx, solidVoids, {
+      titleOffset: 0,
+      alpha: 1.0,
+      lineDash: [],
+      realChipSize,
+      canvasChipSize,
+      showSizes,
+    });
+
+    // 2. 다른 레이어의 보이드들 (점선) - 동기화 모드일 때만
     if (this.syncMode) {
       const dottedVoids = this.getDottedVoids(x, y, layer);
-      dottedVoids.forEach((voidData) => {
-        ctx.beginPath();
-        ctx.strokeStyle = VOID_COLORS[voidData.type] || VOID_COLORS.default;
-        ctx.setLineDash([5, 5]);
-        ctx.globalAlpha = 0.5;
-
-        if (voidData.type === "bbox") {
-          // bbox 타입이면 사각형 그리기 (점선)
-          ctx.strokeRect(
-            voidData.centerX,
-            voidData.centerY,
-            voidData.radiusX,
-            voidData.radiusY
-          );
-        } else {
-          // 일반 void 타입이면 타원 그리기 (점선)
-          ctx.ellipse(
-            voidData.centerX,
-            voidData.centerY,
-            voidData.radiusX,
-            voidData.radiusY,
-            0,
-            0,
-            2 * Math.PI
-          );
-          ctx.stroke();
-        }
+      this.drawVoidsUnified(ctx, dottedVoids, {
+        titleOffset: 0,
+        alpha: 0.5,
+        lineDash: [5, 5],
+        realChipSize,
+        canvasChipSize,
+        showSizes: false, // 점선 void는 크기 표시 안함
       });
-
-      // 상태 복원
-      ctx.globalAlpha = 1.0;
-      ctx.setLineDash([]);
     }
 
     // 3. bbox 그리기 (옵션이 활성화된 경우)
@@ -335,11 +440,7 @@ export class VoidManagerV2 {
     const x = parseInt(match[1], 10);
     const y = parseInt(match[2], 10);
 
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 1.0;
-    ctx.setLineDash([]);
-
-    // 해당 칩의 모든 레이어 보이드들을 실선으로 그리기
+    // 해당 칩의 모든 레이어 보이드들 수집
     const allVoids = [];
     for (const [voidKey, voidData] of this.voids.entries()) {
       if (voidData.x === x && voidData.y === y) {
@@ -347,32 +448,37 @@ export class VoidManagerV2 {
       }
     }
 
-    allVoids.forEach((voidData) => {
-      ctx.beginPath();
-      ctx.strokeStyle = VOID_COLORS[voidData.type] || VOID_COLORS.default;
+    // 통합 함수로 그리기
+    this.drawVoidsUnified(ctx, allVoids, {
+      titleOffset: titleOffset,
+      alpha: 1.0,
+      lineDash: [],
+    });
+  }
 
-      if (voidData.type === "bbox") {
-        // bbox는 사각형으로 그리기
-        ctx.strokeRect(
-          voidData.centerX,
-          voidData.centerY + titleOffset,
-          voidData.radiusX,
-          voidData.radiusY
-        );
-      } else {
-        // 다른 타입은 타원으로 그리기
-        ctx.ellipse(
-          voidData.centerX,
-          voidData.centerY + titleOffset, // titleH 오프셋 적용
-          voidData.radiusX,
-          voidData.radiusY,
-          0,
-          0,
-          2 * Math.PI
-        );
-        ctx.stroke();
+  /**
+   * 특정 타입의 칩들에서 모든 보이드들 수집
+   */
+  getVoidsByChipType(chipType, allPatchPages) {
+    const typeChips = allPatchPages.filter((page) => page.type === chipType);
+    const typeVoids = [];
+
+    typeChips.forEach((chip) => {
+      const match = chip.coord.match(/\((-?\d+),(-?\d+)\)/);
+      if (!match) return;
+
+      const chipX = parseInt(match[1]);
+      const chipY = parseInt(match[2]);
+
+      // 해당 칩의 모든 void 수집
+      for (const [voidKey, voidData] of this.voids.entries()) {
+        if (voidData.x === chipX && voidData.y === chipY) {
+          typeVoids.push(voidData);
+        }
       }
     });
+
+    return typeVoids;
   }
 
   /**
@@ -381,182 +487,6 @@ export class VoidManagerV2 {
   toggleSyncMode() {
     this.syncMode = !this.syncMode;
     return this.syncMode;
-  }
-
-  /**
-   * bbox 표시 모드 토글
-   */
-  toggleBboxMode() {
-    this.showBbox = !this.showBbox;
-    return this.showBbox;
-  }
-
-  /**
-   * 자동 bbox 검출 모드 토글
-   */
-  toggleAutoBboxDetection() {
-    this.autoBboxDetection = !this.autoBboxDetection;
-    return this.autoBboxDetection;
-  }
-
-  /**
-   * 이미지 데이터에서 edge 검출하여 bbox 후보 생성
-   */
-  detectBboxFromImage(imageData) {
-    const width = imageData.width;
-    const height = imageData.height;
-    const data = imageData.data;
-
-    // 간단한 Sobel edge detection
-    const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-    const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-
-    const edges = new Uint8Array(width * height);
-
-    // edge detection
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        let gx = 0,
-          gy = 0;
-
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const idx = ((y + ky) * width + (x + kx)) * 4;
-            const gray = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-            const kernelIdx = (ky + 1) * 3 + (kx + 1);
-
-            gx += gray * sobelX[kernelIdx];
-            gy += gray * sobelY[kernelIdx];
-          }
-        }
-
-        const magnitude = Math.sqrt(gx * gx + gy * gy);
-        edges[y * width + x] = magnitude > 25 ? 255 : 0; // threshold
-      }
-    }
-
-    // 연결된 컴포넌트 찾기 및 bbox 계산
-    const visited = new Uint8Array(width * height);
-    const components = [];
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = y * width + x;
-        if (edges[idx] && !visited[idx]) {
-          const component = this.floodFill(edges, visited, x, y, width, height);
-          if (component.length > 100) {
-            // minimum component size
-            const bbox = this.calculateBbox(component);
-            if (bbox.width > 20 && bbox.height > 20) {
-              // minimum bbox size
-              components.push(bbox);
-            }
-          }
-        }
-      }
-    }
-
-    // 가장 큰 컴포넌트들을 bbox로 저장
-    components.sort((a, b) => b.width * b.height - a.width * a.height);
-    const topBboxes = components.slice(0, 3); // 상위 3개
-
-    return topBboxes;
-  }
-
-  /**
-   * Flood fill for connected component detection
-   */
-  floodFill(edges, visited, startX, startY, width, height) {
-    const stack = [{ x: startX, y: startY }];
-    const component = [];
-
-    while (stack.length > 0) {
-      const { x, y } = stack.pop();
-      const idx = y * width + x;
-
-      if (
-        x < 0 ||
-        x >= width ||
-        y < 0 ||
-        y >= height ||
-        visited[idx] ||
-        !edges[idx]
-      ) {
-        continue;
-      }
-
-      visited[idx] = 1;
-      component.push({ x, y });
-
-      // 8-connectivity
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          stack.push({ x: x + dx, y: y + dy });
-        }
-      }
-    }
-
-    return component;
-  }
-
-  /**
-   * Calculate bounding box from component points
-   */
-  calculateBbox(component) {
-    let minX = Infinity,
-      minY = Infinity;
-    let maxX = -Infinity,
-      maxY = -Infinity;
-
-    component.forEach(({ x, y }) => {
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-    });
-
-    return {
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
-    };
-  }
-
-  /**
-   * 수동으로 bbox 추가
-   */
-  addBbox(chipKey, x, y, width, height) {
-    const chipBboxes = this.bboxes.get(chipKey) || [];
-    chipBboxes.push({ x, y, width, height });
-    this.bboxes.set(chipKey, chipBboxes);
-    console.log(`Added bbox to chip ${chipKey}:`, { x, y, width, height });
-  }
-
-  /**
-   * 테스트용 bbox 추가 (디버깅용)
-   */
-  addTestBbox(chipX, chipY) {
-    const chipKey = this.createChipKey(chipX, chipY);
-    // 테스트용 bbox: 중앙에 50x50 크기
-    this.addBbox(chipKey, 125, 125, 50, 50);
-    console.log(`Added test bbox for chip (${chipX}, ${chipY})`);
-  }
-
-  /**
-   * bbox 제거
-   */
-  removeBbox(chipKey, bboxIndex) {
-    const chipBboxes = this.bboxes.get(chipKey) || [];
-    if (bboxIndex >= 0 && bboxIndex < chipBboxes.length) {
-      chipBboxes.splice(bboxIndex, 1);
-      if (chipBboxes.length === 0) {
-        this.bboxes.delete(chipKey);
-      } else {
-        this.bboxes.set(chipKey, chipBboxes);
-      }
-    }
   }
 
   /**
@@ -620,14 +550,286 @@ export class VoidManagerV2 {
   }
 
   /**
+   * 특정 칩의 bin 계산 (우선순위가 높은 bin 반환)
+   */
+  calculateChipBin(chipX, chipY) {
+    // 해당 칩의 모든 void 타입 수집
+    const voidTypes = new Set();
+    for (const [voidKey, voidData] of this.voids.entries()) {
+      if (voidData.x === chipX && voidData.y === chipY) {
+        voidTypes.add(voidData.type);
+      }
+    }
+
+    // void가 없으면 기본 bin (BIN1) 반환 - 정상 칩
+    if (voidTypes.size === 0) {
+      return {
+        bin: BIN_RULES.default.bin,
+        color: BIN_RULES.default.color,
+        name: BIN_RULES.default.name,
+        voidTypes: [],
+      };
+    }
+
+    // void 타입별로 가장 높은 우선순위 bin 찾기
+    let highestBin = BIN_RULES.default.bin; // 기본값을 BIN1으로 시작
+    let binInfo = BIN_RULES.default;
+
+    for (const voidType of voidTypes) {
+      if (BIN_RULES[voidType] && BIN_RULES[voidType].bin > highestBin) {
+        highestBin = BIN_RULES[voidType].bin;
+        binInfo = BIN_RULES[voidType];
+      }
+    }
+
+    return {
+      bin: highestBin,
+      color: binInfo.color,
+      name: binInfo.name,
+      voidTypes: Array.from(voidTypes),
+    };
+  }
+
+  /**
+   * 모든 칩의 bin 정보 계산 (chipPoints를 기반으로)
+   */
+  calculateAllChipBins(chipPoints = null) {
+    const chipBins = new Map();
+
+    // chipPoints가 제공되지 않으면 void가 있는 칩만 처리
+    if (!chipPoints) {
+      // 모든 칩 좌표 수집 (void가 있는 칩만)
+      const chips = new Set();
+      for (const [voidKey, voidData] of this.voids.entries()) {
+        chips.add(`${voidData.x},${voidData.y}`);
+      }
+
+      // 각 칩의 bin 계산
+      for (const chipKey of chips) {
+        const [x, y] = chipKey.split(",").map(Number);
+        const binInfo = this.calculateChipBin(x, y);
+        chipBins.set(chipKey, binInfo);
+      }
+    } else {
+      // chipPoints가 제공되면 모든 칩 처리 (void 없는 칩도 포함)
+      chipPoints.forEach((chipPoint) => {
+        const { x, y } = chipPoint;
+        const chipKey = `${x},${y}`;
+        const binInfo = this.calculateChipBin(x, y);
+        chipBins.set(chipKey, binInfo);
+      });
+    }
+
+    return chipBins;
+  }
+
+  /**
+   * bin 통계 정보
+   */
+  getBinStats(chipPoints = null) {
+    const chipBins = this.calculateAllChipBins(chipPoints);
+    const stats = {
+      totalChips: chipBins.size,
+      byBin: {},
+    };
+
+    for (const [chipKey, binInfo] of chipBins.entries()) {
+      const binName = binInfo.name;
+      if (!stats.byBin[binName]) {
+        stats.byBin[binName] = {
+          count: 0,
+          color: binInfo.color,
+          bin: binInfo.bin,
+        };
+      }
+      stats.byBin[binName].count++;
+    }
+
+    return stats;
+  }
+
+  /**
+   * bin map 생성 (2D 그리드 형태) - bonding map에 대응되는 위치만 bin 값 설정
+   */
+  generateBinMap(chipPoints, gridSettings) {
+    if (!chipPoints || !gridSettings) return null;
+
+    const { cols, rows } = gridSettings;
+    const binMap = [];
+
+    // 빈 그리드 초기화 (0으로 초기화 - 칩이 없는 위치)
+    for (let row = 0; row < rows; row++) {
+      binMap[row] = new Array(cols).fill(0);
+    }
+
+    // 각 칩 포인트에 대해서만 bin 계산하여 그리드에 설정
+    chipPoints.forEach((chipPoint) => {
+      const { x: chipX, y: chipY } = chipPoint;
+      const binInfo = this.calculateChipBin(chipX, chipY);
+
+      // 칩 좌표를 그리드 인덱스로 변환 (기준점 고려)
+      const gridX = chipX - gridSettings.refGrid.x;
+      const gridY = chipY - gridSettings.refGrid.y;
+
+      // 그리드 범위 내에 있는지 확인
+      if (gridX >= 0 && gridX < cols && gridY >= 0 && gridY < rows) {
+        // 칩이 있는 위치에만 bin 값 설정
+        binMap[gridY][gridX] = binInfo.bin;
+      }
+    });
+
+    return binMap;
+  }
+
+  /**
+   * bin map을 축 표시가 포함된 텍스트 형태로 변환
+   */
+  binMapToText(binMap, gridSettings) {
+    if (!binMap || !gridSettings) return "";
+
+    const { cols, rows, refGrid } = gridSettings;
+    const lines = [];
+
+    // 헤더 추가
+    lines.push("# Bin Map (Tab-separated)");
+    lines.push(`# Grid Size: ${cols} x ${rows}`);
+    lines.push(`# Reference Grid: (${refGrid.x}, ${refGrid.y})`);
+    lines.push("# Legend:");
+    lines.push("#   0 = No Chip");
+    lines.push("#   1 = BIN1 (Good - No Defects)");
+    lines.push("#   2 = BIN2 (dela defects)");
+    lines.push("#   3 = BIN3 (edge defects)");
+    lines.push("#   4 = BIN4 (void defects)");
+    lines.push("#   6 = BIN6 (particle defects)");
+    lines.push("#  10 = BIN10 (void39, signal defects - highest priority)");
+    lines.push("");
+
+    // X축 헤더 (열 번호)
+    const xHeader = ["Y\\X"];
+    for (let x = 0; x < cols; x++) {
+      xHeader.push((refGrid.x + x).toString());
+    }
+    lines.push(xHeader.join("\t"));
+
+    // 각 행 (Y축 포함)
+    for (let y = 0; y < rows; y++) {
+      const rowData = [(refGrid.y + y).toString()]; // Y축 값
+      for (let x = 0; x < cols; x++) {
+        rowData.push(binMap[y][x].toString());
+      }
+      lines.push(rowData.join("\t"));
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * bonding map을 축 표시가 포함된 텍스트 형태로 변환
+   */
+  bondingMapToText(chipPoints, gridSettings) {
+    if (!chipPoints || !gridSettings) return "";
+
+    const { cols, rows, refGrid } = gridSettings;
+    const bondingMap = [];
+
+    // 빈 그리드 초기화 (0 = 빈 공간)
+    for (let row = 0; row < rows; row++) {
+      bondingMap[row] = new Array(cols).fill(0);
+    }
+
+    // 칩 포인트들을 그리드에 표시 (1 = 칩 존재)
+    chipPoints.forEach((chipPoint) => {
+      const { x: chipX, y: chipY } = chipPoint;
+
+      // 칩 좌표를 그리드 인덱스로 변환
+      const gridX = chipX - refGrid.x;
+      const gridY = chipY - refGrid.y;
+
+      // 그리드 범위 내에 있는지 확인
+      if (gridX >= 0 && gridX < cols && gridY >= 0 && gridY < rows) {
+        bondingMap[gridY][gridX] = 1;
+      }
+    });
+
+    const lines = [];
+
+    // 헤더와 legend 추가
+    lines.push("# Bonding Map (Tab-separated)");
+    lines.push(`# Grid Size: ${cols} x ${rows}`);
+    lines.push(`# Reference Grid: (${refGrid.x}, ${refGrid.y})`);
+    lines.push("# Legend: 0=No Chip, 1=Chip Present");
+    lines.push(`# Total Chips: ${chipPoints.length}`);
+    lines.push("");
+
+    // X축 헤더 (열 번호)
+    const xHeader = ["Y\\X"];
+    for (let x = 0; x < cols; x++) {
+      xHeader.push((refGrid.x + x).toString());
+    }
+    lines.push(xHeader.join("\t"));
+
+    // 각 행 (Y축 포함)
+    for (let y = 0; y < rows; y++) {
+      const rowData = [(refGrid.y + y).toString()]; // Y축 값
+      for (let x = 0; x < cols; x++) {
+        rowData.push(bondingMap[y][x].toString());
+      }
+      lines.push(rowData.join("\t"));
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * bin map을 CSV 형태 문자열로 변환 (하위 호환성)
+   */
+  binMapToCSV(binMap) {
+    if (!binMap) return "";
+
+    return binMap.map((row) => row.join("\t")).join("\n");
+  }
+
+  /**
+   * bonding map을 CSV 형태 문자열로 변환 (하위 호환성)
+   */
+  bondingMapToCSV(chipPoints, gridSettings) {
+    if (!chipPoints || !gridSettings) return "";
+
+    const { cols, rows } = gridSettings;
+    const bondingMap = [];
+
+    // 빈 그리드 초기화 (0 = 빈 공간)
+    for (let row = 0; row < rows; row++) {
+      bondingMap[row] = new Array(cols).fill(0);
+    }
+
+    // 칩 포인트들을 그리드에 표시 (1 = 칩 존재)
+    chipPoints.forEach((chipPoint) => {
+      const { x: chipX, y: chipY } = chipPoint;
+
+      // 칩 좌표를 그리드 인덱스로 변환
+      const gridX = chipX - gridSettings.refGrid.x;
+      const gridY = chipY - gridSettings.refGrid.y;
+
+      // 그리드 범위 내에 있는지 확인
+      if (gridX >= 0 && gridX < cols && gridY >= 0 && gridY < rows) {
+        bondingMap[gridY][gridX] = 1;
+      }
+    });
+
+    return bondingMap.map((row) => row.join("\t")).join("\n");
+  }
+
+  /**
    * 디버그 정보 출력
    */
-  debug() {
+  debug(chipPoints = null) {
     console.log("=== VOID MANAGER V2 DEBUG ===");
     console.log("Total voids:", this.voids.size);
     console.log("Void index counters:", this.voidIndexCounters);
     console.log("Sync mode:", this.syncMode);
     console.log("Statistics:", this.getStats());
+    console.log("Bin Statistics:", this.getBinStats(chipPoints));
 
     // 모든 보이드 출력
     for (const [voidKey, voidData] of this.voids.entries()) {

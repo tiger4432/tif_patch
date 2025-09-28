@@ -1,4 +1,13 @@
 // 파일 저장 관리 모듈
+/**
+ * 파일 구조
+ * 파일명_yyyymmdd_hhmmss
+ * - metadata.json, coordinates.json, voids.json, README.txt
+ * - split - layers - patches_with_voids.png
+ * - no_voids - layers - patches_without_voids.png
+ * - merge -
+ */
+
 export class FileSaveManager {
   constructor(app, progressManager) {
     this.app = app;
@@ -9,7 +18,10 @@ export class FileSaveManager {
    * ZIP 파일로 다운로드
    */
   async downloadZip() {
-    if (!this.app.patchManager.allPatchCanvases || !this.app.patchManager.allPatchCanvases.length) {
+    if (
+      !this.app.patchManager.allPatchCanvases ||
+      !this.app.patchManager.allPatchCanvases.length
+    ) {
       alert("먼저 Extract Patches를 실행하세요.");
       return;
     }
@@ -30,6 +42,28 @@ export class FileSaveManager {
     // voids 데이터 추가
     const voidData = this.app.voidManager.exportVoids();
     zip.file("voids.json", JSON.stringify(voidData, null, 2));
+
+    // bin map 추가 (축 표시가 포함된 텍스트 형태)
+    const gridSettings = {
+      cols: +document.getElementById("cols").value,
+      rows: +document.getElementById("rows").value,
+      refGrid: this.app.refGrid
+    };
+    const binMap = this.app.voidManager.generateBinMap(this.app.chipPoints, gridSettings);
+    if (binMap) {
+      const binMapText = this.app.voidManager.binMapToText(binMap, gridSettings);
+      zip.file("bin_map.txt", binMapText);
+    }
+
+    // bonding map 추가 (축 표시가 포함된 텍스트 형태)
+    const bondingMapText = this.app.voidManager.bondingMapToText(this.app.chipPoints, gridSettings);
+    if (bondingMapText) {
+      zip.file("bonding_map.txt", bondingMapText);
+    }
+
+    // bin 통계 정보 추가
+    const binStats = this.app.voidManager.getBinStats(this.app.chipPoints);
+    zip.file("bin_statistics.json", JSON.stringify(binStats, null, 2));
 
     // README 파일 추가
     const readmeContent = this.generateReadmeContent(metadata);
@@ -52,7 +86,9 @@ export class FileSaveManager {
 
       // 1. no_voids 폴더: void가 없는 칩들의 원본 패치
       if (!hasVoids) {
-        const folderPath = `no_voids/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+        const folderPath = `no_voids/${p.typeFolder || p.type}/layer_${String(
+          p.layer
+        ).padStart(2, "0")}`;
         const folder = zip.folder(folderPath);
         const originalCanvas = p.originalCanvas || p.canvas;
         const dataURL = originalCanvas.toDataURL("image/png").split(",")[1];
@@ -61,7 +97,9 @@ export class FileSaveManager {
       }
 
       // 2. split 폴더: 모든 패치 (void 마킹된 버전 또는 빈 마스크)
-      const splitFolderPath = `split/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+      const splitFolderPath = `split/${p.typeFolder || p.type}/layer_${String(
+        p.layer
+      ).padStart(2, "0")}`;
       const splitFolder = zip.folder(splitFolderPath);
       const splitDataURL = p.canvas.toDataURL("image/png").split(",")[1];
       splitFolder.file(`${p.label}.png`, splitDataURL, { base64: true });
@@ -73,18 +111,26 @@ export class FileSaveManager {
 
     // split 폴더에 merge mask 추가 (모든 칩에 대해, void 없으면 빈 마스크)
     const chipCoords = new Set();
-    this.app.patchManager.allPatchCanvases.forEach(p => {
-      const coord = p.label.split('_')[0] + '_' + p.label.split('_')[1]; // X-2_Y-8 형태
-      chipCoords.add(JSON.stringify({coord, type: p.typeFolder || p.type}));
+    this.app.patchManager.allPatchCanvases.forEach((p) => {
+      const coord = p.label.split("_")[0] + "_" + p.label.split("_")[1]; // X-2_Y-8 형태
+      chipCoords.add(JSON.stringify({ coord, type: p.typeFolder || p.type }));
     });
 
-    const uniqueChipCoords = Array.from(chipCoords).map(item => JSON.parse(item));
-    uniqueChipCoords.forEach(({coord, type}) => {
-      const voidMaskCanvas = this.app.createVoidMaskCanvas(`(${coord.replace('X', '').replace('Y', ',').replace('_', '')})`, type, true);
+    const uniqueChipCoords = Array.from(chipCoords).map((item) =>
+      JSON.parse(item)
+    );
+    uniqueChipCoords.forEach(({ coord, type }) => {
+      const voidMaskCanvas = this.app.createVoidMaskCanvas(
+        `(${coord.replace("X", "").replace("Y", ",").replace("_", "")})`,
+        type,
+        true
+      );
       if (voidMaskCanvas) {
         const mergeFolderPath = `merge/${type}`;
         const mergeFolder = zip.folder(mergeFolderPath);
-        const mergeDataURL = voidMaskCanvas.toDataURL("image/png").split(",")[1];
+        const mergeDataURL = voidMaskCanvas
+          .toDataURL("image/png")
+          .split(",")[1];
         mergeFolder.file(`${coord}_merge.png`, mergeDataURL, { base64: true });
       }
     });
@@ -95,8 +141,12 @@ export class FileSaveManager {
       const summaryFolder = zip.folder("summary");
       summaryMasks.forEach((summaryCanvas, chipType) => {
         const sanitizedType = this.sanitizeFileName(chipType);
-        const summaryDataURL = summaryCanvas.toDataURL("image/png").split(",")[1];
-        summaryFolder.file(`${sanitizedType}_summary.png`, summaryDataURL, { base64: true });
+        const summaryDataURL = summaryCanvas
+          .toDataURL("image/png")
+          .split(",")[1];
+        summaryFolder.file(`${sanitizedType}_summary.png`, summaryDataURL, {
+          base64: true,
+        });
       });
     }
 
@@ -104,14 +154,7 @@ export class FileSaveManager {
     try {
       const content = await zip.generateAsync({ type: "blob" });
 
-      // 파일명 결정
-      const userFileName = document.getElementById("zipFileName").value.trim();
-      let fileName;
-      if (userFileName) {
-        fileName = userFileName.endsWith(".zip") ? userFileName : userFileName + ".zip";
-      } else {
-        fileName = this.app.generateFileName("patches", ".zip");
-      }
+      const fileName = this.app.generateFileName("patches", ".zip");
 
       // 바로 다운로드 (파일 매니저 없이)
       saveAs(content, fileName);
@@ -134,13 +177,16 @@ export class FileSaveManager {
    * 폴더 구조 그대로 저장 (ZIP 없이)
    */
   async downloadAsFolderStructure() {
-    if (!this.app.patchManager.allPatchCanvases || !this.app.patchManager.allPatchCanvases.length) {
+    if (
+      !this.app.patchManager.allPatchCanvases ||
+      !this.app.patchManager.allPatchCanvases.length
+    ) {
       alert("먼저 Extract Patches를 실행하세요.");
       return;
     }
 
     // File System Access API 지원 확인
-    if (!('showDirectoryPicker' in window)) {
+    if (!("showDirectoryPicker" in window)) {
       alert("이 기능은 최신 브라우저에서만 지원됩니다. (Chrome 86+, Edge 86+)");
       return;
     }
@@ -148,21 +194,25 @@ export class FileSaveManager {
     try {
       // 사용자에게 저장할 루트 디렉토리 선택 요청
       const parentDirectoryHandle = await window.showDirectoryPicker({
-        mode: 'readwrite'
+        mode: "readwrite",
       });
 
       // 파일명_시간 형태의 하위폴더 생성
-      const timestamp = new Date().toISOString()
-        .replace(/[:.]/g, '-')
-        .replace('T', '_')
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .replace("T", "_")
         .substring(0, 19); // YYYY-MM-DD_HH-MM-SS
 
-      const baseFileName = this.app.currentTiffFileName || 'patches';
+      const baseFileName = this.app.currentTiffFileName || "patches";
       const sanitizedBaseFileName = this.sanitizeFileName(baseFileName);
       const folderName = `${sanitizedBaseFileName}_${timestamp}`;
 
       console.log(`Creating project folder: ${folderName}`);
-      const rootDirectoryHandle = await parentDirectoryHandle.getDirectoryHandle(folderName, { create: true });
+      const rootDirectoryHandle =
+        await parentDirectoryHandle.getDirectoryHandle(folderName, {
+          create: true,
+        });
 
       // 폴더 저장용 프로그레스바 표시
       this.progressManager.showFolderSaveProgress();
@@ -188,32 +238,120 @@ export class FileSaveManager {
       const patches = this.app.patchManager.allPatchCanvases;
       const summaryMasks = this.app.patchManager.createAllTypeSummaryMasks();
       const chipCoords = new Set();
-      patches.forEach(p => {
-        const coord = p.label.split('_')[0] + '_' + p.label.split('_')[1];
-        chipCoords.add(JSON.stringify({coord, type: p.typeFolder || p.type}));
+      patches.forEach((p) => {
+        const coord = p.label.split("_")[0] + "_" + p.label.split("_")[1];
+        chipCoords.add(JSON.stringify({ coord, type: p.typeFolder || p.type }));
       });
-      const uniqueChipCoords = Array.from(chipCoords).map(item => JSON.parse(item));
+      const uniqueChipCoords = Array.from(chipCoords).map((item) =>
+        JSON.parse(item)
+      );
 
-      const totalItems = 4 + (patches.length * 2) + uniqueChipCoords.length + summaryMasks.size; // metadata + patches + merge + summary
+      const totalItems =
+        7 + patches.length * 2 + uniqueChipCoords.length + summaryMasks.size; // metadata(4) + bin files(3) + patches + merge + summary
       let processedCount = 0;
 
       // 메타데이터 파일들 저장
-      this.progressManager.updateFolderSaveProgress(processedCount, totalItems, "Saving metadata.json...", "");
-      await this.saveFileToDirectory(rootDirectoryHandle, "metadata.json", JSON.stringify(metadata, null, 2));
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving metadata.json...",
+        ""
+      );
+      await this.saveFileToDirectory(
+        rootDirectoryHandle,
+        "metadata.json",
+        JSON.stringify(metadata, null, 2)
+      );
       processedCount++;
 
-      this.progressManager.updateFolderSaveProgress(processedCount, totalItems, "Saving coordinates.json...", "");
-      await this.saveFileToDirectory(rootDirectoryHandle, "coordinates.json", JSON.stringify(coordinateInfo, null, 2));
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving coordinates.json...",
+        ""
+      );
+      await this.saveFileToDirectory(
+        rootDirectoryHandle,
+        "coordinates.json",
+        JSON.stringify(coordinateInfo, null, 2)
+      );
       processedCount++;
 
-      this.progressManager.updateFolderSaveProgress(processedCount, totalItems, "Saving voids.json...", "");
-      await this.saveFileToDirectory(rootDirectoryHandle, "voids.json", JSON.stringify(voidData, null, 2));
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving voids.json...",
+        ""
+      );
+      await this.saveFileToDirectory(
+        rootDirectoryHandle,
+        "voids.json",
+        JSON.stringify(voidData, null, 2)
+      );
+      processedCount++;
+
+      // bin map과 bonding map 저장
+      const gridSettings = {
+        cols: +document.getElementById("cols").value,
+        rows: +document.getElementById("rows").value,
+        refGrid: this.app.refGrid
+      };
+
+      // bin map 저장
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving bin_map.txt...",
+        ""
+      );
+      const binMap = this.app.voidManager.generateBinMap(this.app.chipPoints, gridSettings);
+      if (binMap) {
+        const binMapText = this.app.voidManager.binMapToText(binMap, gridSettings);
+        await this.saveFileToDirectory(rootDirectoryHandle, "bin_map.txt", binMapText);
+      }
+      processedCount++;
+
+      // bonding map 저장
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving bonding_map.txt...",
+        ""
+      );
+      const bondingMapText = this.app.voidManager.bondingMapToText(this.app.chipPoints, gridSettings);
+      if (bondingMapText) {
+        await this.saveFileToDirectory(rootDirectoryHandle, "bonding_map.txt", bondingMapText);
+      }
+      processedCount++;
+
+      // bin 통계 저장
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving bin_statistics.json...",
+        ""
+      );
+      const binStats = this.app.voidManager.getBinStats(this.app.chipPoints);
+      await this.saveFileToDirectory(
+        rootDirectoryHandle,
+        "bin_statistics.json",
+        JSON.stringify(binStats, null, 2)
+      );
       processedCount++;
 
       // README 파일 생성 및 저장
-      this.progressManager.updateFolderSaveProgress(processedCount, totalItems, "Saving README.txt...", "");
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Saving README.txt...",
+        ""
+      );
       const readmeContent = this.generateReadmeContent(metadata);
-      await this.saveFileToDirectory(rootDirectoryHandle, "README.txt", readmeContent);
+      await this.saveFileToDirectory(
+        rootDirectoryHandle,
+        "README.txt",
+        readmeContent
+      );
       processedCount++;
 
       console.log("Metadata files saved, processing patches...");
@@ -231,17 +369,31 @@ export class FileSaveManager {
 
           // no_voids 폴더: void가 없는 칩들의 원본 패치
           if (!hasVoids) {
-            const folderPath = `no_voids/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+            const folderPath = `no_voids/${
+              p.typeFolder || p.type
+            }/layer_${String(p.layer).padStart(2, "0")}`;
             const originalCanvas = p.originalCanvas || p.canvas;
             savePromises.push(
-              this.saveCanvasToPath(rootDirectoryHandle, folderPath, `${p.label}.png`, originalCanvas)
+              this.saveCanvasToPath(
+                rootDirectoryHandle,
+                folderPath,
+                `${p.label}.png`,
+                originalCanvas
+              )
             );
           }
 
           // split 폴더: 모든 패치 (void 마킹된 버전 또는 빈 마스크)
-          const splitFolderPath = `split/${p.typeFolder || p.type}/layer_${String(p.layer).padStart(2, "0")}`;
+          const splitFolderPath = `split/${
+            p.typeFolder || p.type
+          }/layer_${String(p.layer).padStart(2, "0")}`;
           savePromises.push(
-            this.saveCanvasToPath(rootDirectoryHandle, splitFolderPath, `${p.label}.png`, p.canvas)
+            this.saveCanvasToPath(
+              rootDirectoryHandle,
+              splitFolderPath,
+              `${p.label}.png`,
+              p.canvas
+            )
           );
 
           // 해당 패치의 모든 저장 작업 완료 대기
@@ -257,7 +409,9 @@ export class FileSaveManager {
         this.progressManager.updateFolderSaveProgress(
           processedCount,
           totalItems,
-          `Saving patches... (${Math.min(i + BATCH_SIZE, patches.length)}/${patches.length})`,
+          `Saving patches... (${Math.min(i + BATCH_SIZE, patches.length)}/${
+            patches.length
+          })`,
           `${percentage}% complete`
         );
       }
@@ -270,11 +424,20 @@ export class FileSaveManager {
       for (let i = 0; i < uniqueChipCoords.length; i += MERGE_BATCH_SIZE) {
         const mergeBatch = uniqueChipCoords.slice(i, i + MERGE_BATCH_SIZE);
 
-        const mergePromises = mergeBatch.map(async ({coord, type}) => {
-          const voidMaskCanvas = this.app.createVoidMaskCanvas(`(${coord.replace('X', '').replace('Y', ',').replace('_', '')})`, type, true);
+        const mergePromises = mergeBatch.map(async ({ coord, type }) => {
+          const voidMaskCanvas = this.app.createVoidMaskCanvas(
+            `(${coord.replace("X", "").replace("Y", ",").replace("_", "")})`,
+            type,
+            true
+          );
           if (voidMaskCanvas) {
             const mergeFolderPath = `merge/${type}`;
-            await this.saveCanvasToPath(rootDirectoryHandle, mergeFolderPath, `${coord}_merge.png`, voidMaskCanvas);
+            await this.saveCanvasToPath(
+              rootDirectoryHandle,
+              mergeFolderPath,
+              `${coord}_merge.png`,
+              voidMaskCanvas
+            );
             return coord;
           }
           return null;
@@ -286,21 +449,36 @@ export class FileSaveManager {
         this.progressManager.updateFolderSaveProgress(
           processedCount,
           totalItems,
-          `Saving merge masks... (${Math.min(i + MERGE_BATCH_SIZE, uniqueChipCoords.length)}/${uniqueChipCoords.length})`,
+          `Saving merge masks... (${Math.min(
+            i + MERGE_BATCH_SIZE,
+            uniqueChipCoords.length
+          )}/${uniqueChipCoords.length})`,
           `${percentage}% complete`
         );
       }
 
       // summary 폴더: type별 summary 저장
-      this.progressManager.updateFolderSaveProgress(processedCount, totalItems, "Creating type summaries...", "");
+      this.progressManager.updateFolderSaveProgress(
+        processedCount,
+        totalItems,
+        "Creating type summaries...",
+        ""
+      );
 
       if (summaryMasks.size > 0) {
-        const summaryPromises = Array.from(summaryMasks.entries()).map(async ([chipType, summaryCanvas]) => {
-          const summaryFolderPath = `summary`;
-          const sanitizedType = this.sanitizeFileName(chipType);
-          await this.saveCanvasToPath(rootDirectoryHandle, summaryFolderPath, `${sanitizedType}_summary.png`, summaryCanvas);
-          return chipType;
-        });
+        const summaryPromises = Array.from(summaryMasks.entries()).map(
+          async ([chipType, summaryCanvas]) => {
+            const summaryFolderPath = `summary`;
+            const sanitizedType = this.sanitizeFileName(chipType);
+            await this.saveCanvasToPath(
+              rootDirectoryHandle,
+              summaryFolderPath,
+              `${sanitizedType}_summary.png`,
+              summaryCanvas
+            );
+            return chipType;
+          }
+        );
 
         await Promise.all(summaryPromises);
         processedCount += summaryMasks.size;
@@ -308,22 +486,30 @@ export class FileSaveManager {
       }
 
       // 완료
-      this.progressManager.updateFolderSaveProgress(totalItems, totalItems, "Save completed!", "100% complete");
+      this.progressManager.updateFolderSaveProgress(
+        totalItems,
+        totalItems,
+        "Save completed!",
+        "100% complete"
+      );
 
       // 잠시 후 프로그레스바 숨기기
       setTimeout(() => {
         this.progressManager.hideFolderSaveProgress();
       }, 2000);
 
-      console.log(`Folder structure download completed! ${processedCount} files saved.`);
-      alert(`폴더 구조로 저장 완료!\n총 ${processedCount}개 파일이 저장되었습니다.\n\n폴더: ${folderName}`);
-
+      console.log(
+        `Folder structure download completed! ${processedCount} files saved.`
+      );
+      alert(
+        `폴더 구조로 저장 완료!\n총 ${processedCount}개 파일이 저장되었습니다.\n\n폴더: ${folderName}`
+      );
     } catch (error) {
       this.progressManager.hideFolderSaveProgress();
-      if (error.name === 'AbortError') {
-        console.log('User cancelled directory selection');
+      if (error.name === "AbortError") {
+        console.log("User cancelled directory selection");
       } else {
-        console.error('Folder structure download error:', error);
+        console.error("Folder structure download error:", error);
         alert(`폴더 저장 중 오류 발생: ${error.message}`);
       }
     }
@@ -333,7 +519,9 @@ export class FileSaveManager {
    * 파일을 지정된 디렉토리에 저장
    */
   async saveFileToDirectory(directoryHandle, fileName, content) {
-    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+    const fileHandle = await directoryHandle.getFileHandle(fileName, {
+      create: true,
+    });
     const writable = await fileHandle.createWritable();
     await writable.write(content);
     await writable.close();
@@ -345,10 +533,10 @@ export class FileSaveManager {
   sanitizeFileName(fileName) {
     // Windows/Mac/Linux에서 허용되지 않는 문자들 제거
     return fileName
-      .replace(/[<>:"\/\\|?*\x00-\x1f]/g, '_')  // 특수문자를 '_'로 대체
-      .replace(/\.$/, '_')  // 마지막 점 제거
-      .replace(/\s+/g, '_')  // 공백을 '_'로 대체
-      .substring(0, 255);  // 길이 제한
+      .replace(/[<>:"\/\\|?*\x00-\x1f]/g, "_") // 특수문자를 '_'로 대체
+      .replace(/\.$/, "_") // 마지막 점 제거
+      .replace(/\s+/g, "_") // 공백을 '_'로 대체
+      .substring(0, 255); // 길이 제한
   }
 
   /**
@@ -357,41 +545,53 @@ export class FileSaveManager {
   async saveCanvasToPath(rootDirectoryHandle, folderPath, fileName, canvas) {
     try {
       // 폴더 경로와 파일명 정리
-      const sanitizedFolderPath = folderPath.split('/').map(segment =>
-        segment ? this.sanitizeFileName(segment) : segment
-      ).join('/');
+      const sanitizedFolderPath = folderPath
+        .split("/")
+        .map((segment) => (segment ? this.sanitizeFileName(segment) : segment))
+        .join("/");
       const sanitizedFileName = this.sanitizeFileName(fileName);
 
       // 폴더 경로를 단계별로 생성
-      const pathSegments = sanitizedFolderPath.split('/');
+      const pathSegments = sanitizedFolderPath.split("/");
       let currentDirHandle = rootDirectoryHandle;
 
       for (const segment of pathSegments) {
         if (segment) {
           try {
-            currentDirHandle = await currentDirHandle.getDirectoryHandle(segment, { create: true });
+            currentDirHandle = await currentDirHandle.getDirectoryHandle(
+              segment,
+              { create: true }
+            );
           } catch (error) {
-            console.error(`Failed to create/access directory: ${segment}`, error);
+            console.error(
+              `Failed to create/access directory: ${segment}`,
+              error
+            );
             throw error;
           }
         }
       }
 
       // Canvas를 Blob으로 변환 (최적화된 압축 설정)
-      const blob = await new Promise(resolve => {
-        canvas.toBlob(resolve, 'image/png', 0.8); // 압축률 조정으로 속도 향상
+      const blob = await new Promise((resolve) => {
+        canvas.toBlob(resolve, "image/png", 0.8); // 압축률 조정으로 속도 향상
       });
 
       // 파일 저장 (정리된 파일명 사용)
-      const fileHandle = await currentDirHandle.getFileHandle(sanitizedFileName, { create: true });
+      const fileHandle = await currentDirHandle.getFileHandle(
+        sanitizedFileName,
+        { create: true }
+      );
       const writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
 
       console.log(`Saved: ${sanitizedFolderPath}/${sanitizedFileName}`);
-
     } catch (error) {
-      console.error(`Failed to save canvas to path ${folderPath}/${fileName}:`, error);
+      console.error(
+        `Failed to save canvas to path ${folderPath}/${fileName}:`,
+        error
+      );
       throw error;
     }
   }
@@ -437,6 +637,17 @@ Version: ${metadata.version}
 - metadata.json: Grid and extraction settings
 - coordinates.json: Chip coordinate data
 - voids.json: Void detection data
+- bin_map.txt: Bin classification map with X,Y axis labels (tab-separated)
+- bonding_map.txt: Chip presence map with X,Y axis labels (tab-separated, 1=chip, 0=empty)
+- bin_statistics.json: Bin distribution statistics
+
+## Bin Classification Rules
+- BIN10 (Red): void39, signal defects - highest priority
+- BIN6 (Purple): particle defects
+- BIN4 (Orange): void defects
+- BIN3 (Green): edge defects
+- BIN2 (Blue): dela defects
+- BIN1 (Skyblue): no defects - default
 `;
   }
 
@@ -450,12 +661,12 @@ Version: ${metadata.version}
         try {
           // 사용자에게 저장할 디렉토리 선택 요청
           const directoryHandle = await window.showDirectoryPicker({
-            mode: "readwrite"
+            mode: "readwrite",
           });
 
           // 파일 핸들 생성
           const fileHandle = await directoryHandle.getFileHandle(fileName, {
-            create: true
+            create: true,
           });
 
           // 파일에 쓰기
@@ -479,7 +690,6 @@ Version: ${metadata.version}
       // Fallback: 기본 saveAs 사용 (다운로드 폴더에 저장)
       console.log("Using fallback saveAs method");
       saveAs(content, fileName);
-
     } catch (error) {
       console.error("Save error:", error);
       // 최종 fallback

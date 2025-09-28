@@ -454,4 +454,52 @@ export class ImageProcessor {
     }
     return null;
   }
+
+  static getBboxList(srcCanvas) {
+    let src = cv.imread(srcCanvas);
+    let gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+    // Blur + Canny Edge
+    let blur = new cv.Mat();
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+    let edges = new cv.Mat();
+    const cannyMin = parseFloat(document.getElementById("cannyMin").value);
+    const cannyMax = parseFloat(document.getElementById("cannyMax").value);
+    cv.Canny(blur, edges, cannyMin, cannyMax);
+
+    // Contour 찾기
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+    cv.findContours(
+      edges,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE
+    );
+
+    const bboxArray = [];
+
+    for (let i = 0; i < contours.size(); i++) {
+      let cnt = contours.get(i);
+      let peri = cv.arcLength(cnt, true);
+      let approx = new cv.Mat();
+      cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+
+      // 사각형 조건: 꼭짓점 4, 넓이 1000 이상, 볼록
+      if (
+        approx.rows === 4 &&
+        cv.contourArea(approx) > 1000 &&
+        cv.isContourConvex(approx)
+      ) {
+        // ---- 📍BBox 좌표 추출 ----
+        let rect = cv.boundingRect(approx);
+        // JS 배열로 저장 [x, y, width, height]
+        bboxArray.push([rect.x, rect.y, rect.width, rect.height]);
+      }
+    }
+
+    return bboxArray;
+  }
 }
