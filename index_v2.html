@@ -83,6 +83,39 @@
         ></label>
       </div>
 
+      <h3>Quick Load</h3>
+      <div class="info-panel" style="margin-bottom: 12px; padding: 8px; font-size: 11px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+          <button id="quickSave1" style="padding: 4px; font-size: 10px; background: #28a745; border-color: #28a745;">Save 1</button>
+          <button id="quickLoad1" style="padding: 4px; font-size: 10px;">Load 1</button>
+          <div id="slotInfo1" style="grid-column: 1 / -1; min-height: 20px; border: 1px solid #ddd; padding: 2px; border-radius: 3px; background: #f9f9f9;"></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+          <button id="quickSave2" style="padding: 4px; font-size: 10px; background: #28a745; border-color: #28a745;">Save 2</button>
+          <button id="quickLoad2" style="padding: 4px; font-size: 10px;">Load 2</button>
+          <div id="slotInfo2" style="grid-column: 1 / -1; min-height: 20px; border: 1px solid #ddd; padding: 2px; border-radius: 3px; background: #f9f9f9;"></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+          <button id="quickSave3" style="padding: 4px; font-size: 10px; background: #28a745; border-color: #28a745;">Save 3</button>
+          <button id="quickLoad3" style="padding: 4px; font-size: 10px;">Load 3</button>
+          <div id="slotInfo3" style="grid-column: 1 / -1; min-height: 20px; border: 1px solid #ddd; padding: 2px; border-radius: 3px; background: #f9f9f9;"></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+          <button id="quickSave4" style="padding: 4px; font-size: 10px; background: #28a745; border-color: #28a745;">Save 4</button>
+          <button id="quickLoad4" style="padding: 4px; font-size: 10px;">Load 4</button>
+          <div id="slotInfo4" style="grid-column: 1 / -1; min-height: 20px; border: 1px solid #ddd; padding: 2px; border-radius: 3px; background: #f9f9f9;"></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+          <button id="quickSave5" style="padding: 4px; font-size: 10px; background: #28a745; border-color: #28a745;">Save 5</button>
+          <button id="quickLoad5" style="padding: 4px; font-size: 10px;">Load 5</button>
+          <div id="slotInfo5" style="grid-column: 1 / -1; min-height: 20px; border: 1px solid #ddd; padding: 2px; border-radius: 3px; background: #f9f9f9;"></div>
+        </div>
+        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd;">
+          <input id="folderPath" type="text" placeholder="예: /extracted_patches_20241201_123456" style="font-size: 11px; margin-bottom: 4px;">
+          <button id="loadFromFolder" style="width: 100%; padding: 6px; font-size: 11px; background: #6c757d; border-color: #6c757d;">Load from Folder</button>
+        </div>
+      </div>
+
       <h3>Compression Settings</h3>
       <div class="info-panel" style="margin-bottom: 12px; padding: 8px">
         <strong style="font-size: 14px">Max Size:</strong>
@@ -2467,5 +2500,6 @@ Happy testing! 🎯`);
       const app = new WaferAppV2();
       window.waferApp = app;
     </script>
+    <script src="js/quickloadManager.js"></script>
   </body>
 </html>
