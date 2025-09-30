@@ -7,28 +7,47 @@ import socketserver
 import os
 import sys
 import re
-from urllib.parse import unquote
+import zipfile
+import io
+import json
+from urllib.parse import unquote, parse_qs
 
 class CustomRangeHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     """완전한 Range 요청을 지원하는 HTTP 핸들러"""
     
     def do_GET(self):
         """GET 요청 처리 (Range 지원 포함)"""
-        path = self.translate_path(self.path)
-        
+        # URL과 쿼리 파라미터 분리
+        url_parts = self.path.split('?', 1)
+        url_path = url_parts[0]
+        query_params = parse_qs(url_parts[1]) if len(url_parts) > 1 else {}
+
+        path = self.translate_path(url_path)
+
         if not os.path.exists(path):
             self.send_error(404, "File not found")
             return
-        
+
         if os.path.isdir(path):
+            # ZIP 압축 요청 처리
+            if 'zip' in query_params and query_params['zip'][0].lower() == 'true':
+                self.send_directory_as_zip(path, url_path)
+                return
+
+            # JSON 디렉토리 리스팅 요청 처리
+            if 'list' in query_params and query_params['list'][0].lower() == 'true':
+                self.send_directory_json(path)
+                return
+
+            # 일반 HTML 디렉토리 리스팅
             self.send_directory_listing(path)
             return
-        
+
         try:
             with open(path, 'rb') as f:
                 file_size = os.path.getsize(path)
                 range_header = self.headers.get('Range')
-                
+
                 if range_header:
                     # Range 요청 처리
                     print(f"Range request: {range_header} for {self.path} (file_size: {file_size})")
@@ -37,7 +56,7 @@ class CustomRangeHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     # 일반 요청 처리
                     print(f"Normal request for {self.path}")
                     self.handle_normal_request(f, file_size)
-                    
+
         except IOError:
             self.send_error(404, "File not found")
     
@@ -289,6 +308,77 @@ class CustomRangeHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.add_cors_headers()
         self.end_headers()
         self.wfile.write(html.encode())
+
+    def send_directory_as_zip(self, path, url_path):
+        """디렉토리를 ZIP으로 압축하여 전송"""
+        try:
+            print(f"Creating ZIP for directory: {path}")
+
+            # 메모리에서 ZIP 생성
+            zip_buffer = io.BytesIO()
+
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # ZIP 내 경로를 상대 경로로 설정
+                        arc_name = os.path.relpath(file_path, path)
+                        print(f"Adding to ZIP: {arc_name}")
+                        zip_file.write(file_path, arc_name)
+
+            zip_data = zip_buffer.getvalue()
+            zip_buffer.close()
+
+            # ZIP 파일명 생성
+            folder_name = os.path.basename(url_path.rstrip('/')) or 'folder'
+            zip_filename = f"{folder_name}.zip"
+
+            print(f"Sending ZIP file: {zip_filename}, size: {len(zip_data)} bytes")
+
+            # ZIP 응답 전송
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{zip_filename}"')
+            self.send_header('Content-Length', str(len(zip_data)))
+            self.add_cors_headers()
+            self.end_headers()
+
+            self.wfile.write(zip_data)
+
+        except Exception as e:
+            print(f"Error creating ZIP: {e}")
+            self.send_error(500, f"Internal server error: {str(e)}")
+
+    def send_directory_json(self, path):
+        """디렉토리 내용을 JSON으로 전송"""
+        try:
+            files = []
+            directories = []
+
+            for item in os.listdir(path):
+                item_path = os.path.join(path, item)
+                if os.path.isdir(item_path):
+                    directories.append(item)
+                else:
+                    files.append(item)
+
+            response_data = {
+                'files': sorted(files),
+                'directories': sorted(directories)
+            }
+
+            json_data = json.dumps(response_data, indent=2)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(json_data.encode())))
+            self.add_cors_headers()
+            self.end_headers()
+            self.wfile.write(json_data.encode())
+
+        except Exception as e:
+            print(f"Error creating directory JSON: {e}")
+            self.send_error(500, f"Internal server error: {str(e)}")
 
 def run_server(port=8081, directory=None):
     """Range 지원 서버 실행"""

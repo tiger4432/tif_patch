@@ -214,6 +214,14 @@ class QuickloadManager {
 
             console.log('폴더에서 로딩 시작:', folderPath);
 
+            // ZIP 압축 전송 시도 (Range 서버에서 지원하는 경우)
+            if (await this.loadFromFolderAsZip(folderPath)) {
+                return; // ZIP 로딩 성공시 종료
+            }
+
+            // Fallback: 개별 파일 로딩
+            console.log('ZIP 로딩 실패, 개별 파일 로딩으로 전환');
+
             // 1. 메타데이터 로드
             const metadata = await this.loadMetadataFromFolder(folderPath);
             if (!metadata) {
@@ -256,6 +264,178 @@ class QuickloadManager {
             loadBtn.textContent = 'Load from Folder';
             loadBtn.disabled = false;
         }
+    }
+
+    async loadFromFolderAsZip(folderPath) {
+        try {
+            console.log('ZIP 압축 전송 시도:', folderPath);
+
+            // Range 서버에 ZIP 압축 요청
+            const response = await fetch(`http://localhost:8083${folderPath}?zip=true`);
+            if (!response.ok) {
+                console.log('ZIP 압축 전송 미지원 또는 실패');
+                return false;
+            }
+
+            console.log('ZIP 파일 다운로드 중...');
+            const zipBlob = await response.blob();
+
+            // JSZip으로 압축 해제
+            const zip = new JSZip();
+            const zipContent = await zip.loadAsync(zipBlob);
+
+            console.log('ZIP 파일 압축 해제 완료, 파일 개수:', Object.keys(zipContent.files).length);
+
+            // 1. 메타데이터 파일들 추출
+            const metadata = await this.extractFileFromZip(zipContent, 'metadata.json', 'json');
+            const coordinatesData = await this.extractFileFromZip(zipContent, 'coordinates.json', 'json');
+            const voids = await this.extractFileFromZip(zipContent, 'voids.json', 'json') || [];
+
+            if (!metadata || !coordinatesData) {
+                throw new Error('필수 메타데이터 파일이 ZIP에 없습니다.');
+            }
+
+            // 2. 패치 이미지들 추출 및 복원
+            const restoredPatches = await this.reconstructPatchesFromZip(zipContent, coordinatesData);
+
+            // 3. 앱 상태 복원
+            const reconstructedData = {
+                patches: restoredPatches,
+                voids: voids,
+                metadata: metadata,
+                version: 'v2_zip_load'
+            };
+
+            await this.restoreAppState(reconstructedData);
+
+            console.log('ZIP 로딩 완료');
+            alert(`ZIP에서 로드 완료!\n경로: ${folderPath}\n패치: ${restoredPatches.length}개\n보이드: ${voids.length}개`);
+
+            // CSV 영역 업데이트
+            if (metadata.csvRows && metadata.csvRows.length > 0) {
+                const csvText = this.generateCSVFromCoords(metadata.csvRows);
+                document.getElementById('csvPaste').value = csvText;
+            }
+
+            return true; // 성공
+
+        } catch (error) {
+            console.error('ZIP 로딩 실패:', error);
+            return false; // 실패시 fallback
+        }
+    }
+
+    async extractFileFromZip(zipContent, fileName, type = 'text') {
+        try {
+            const file = zipContent.files[fileName];
+            if (!file) {
+                console.warn(`ZIP에서 ${fileName} 파일을 찾을 수 없음`);
+                return null;
+            }
+
+            const content = await file.async('text');
+            return type === 'json' ? JSON.parse(content) : content;
+        } catch (error) {
+            console.error(`ZIP에서 ${fileName} 추출 실패:`, error);
+            return null;
+        }
+    }
+
+    async reconstructPatchesFromZip(zipContent, coordinatesData) {
+        const coordinates = coordinatesData.coordinates || coordinatesData;
+        const reconstructedPatches = [];
+
+        console.log('ZIP에서 패치 복원 시작, 좌표 개수:', coordinates.length);
+
+        // 좌표별로 패치 복원
+        for (const coord of coordinates) {
+            const coordKey = `(${coord.x},${coord.y})`;
+            const patchData = {
+                coord: coordKey,
+                type: coord.type || 'NA',
+                layers: []
+            };
+
+            // no_voids 또는 split 폴더에서 해당 좌표의 레이어들 찾기
+            const layerFiles = this.findPatchFilesInZip(zipContent, coord.x, coord.y, coord.type);
+
+            for (const layerFile of layerFiles) {
+                try {
+                    // ZIP에서 이미지 파일을 Blob으로 추출
+                    const imageBlob = await zipContent.files[layerFile.path].async('blob');
+
+                    // Blob을 Canvas로 변환
+                    const canvas = await this.blobToCanvas(imageBlob);
+
+                    // 라벨 생성
+                    const label = this.generatePatchLabel(coord.x, coord.y, layerFile.layer, coord.type);
+
+                    // ImageData 생성
+                    const ctx = canvas.getContext('2d');
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+                    // void 이벤트 연결
+                    window.waferApp.attachVoidEvents(canvas, label, imageData);
+
+                    patchData.layers.push({
+                        canvas: canvas,
+                        label: label,
+                        type: coord.type,
+                        layer: layerFile.layer,
+                        imageData: imageData
+                    });
+
+                } catch (error) {
+                    console.error('패치 복원 실패:', layerFile.path, error);
+                }
+            }
+
+            if (patchData.layers.length > 0) {
+                reconstructedPatches.push(patchData);
+            }
+        }
+
+        console.log('ZIP에서 패치 복원 완료:', reconstructedPatches.length);
+        return reconstructedPatches;
+    }
+
+    findPatchFilesInZip(zipContent, x, y, type) {
+        const layerFiles = [];
+        const coordPattern = `X${x.toString().padStart(3, '0')}_Y${y.toString().padStart(3, '0')}`;
+
+        // ZIP 파일 목록에서 해당 좌표의 패치 파일들 찾기
+        Object.keys(zipContent.files).forEach(filePath => {
+            if (filePath.includes(coordPattern) && filePath.endsWith('.png')) {
+                // 파일 경로에서 레이어 번호 추출
+                const layerMatch = filePath.match(/layer_(\d+)/);
+                if (layerMatch) {
+                    layerFiles.push({
+                        path: filePath,
+                        layer: parseInt(layerMatch[1])
+                    });
+                }
+            }
+        });
+
+        // 레이어 순서대로 정렬
+        layerFiles.sort((a, b) => a.layer - b.layer);
+        return layerFiles;
+    }
+
+    async blobToCanvas(blob) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                resolve(canvas);
+            };
+            img.onerror = () => reject(new Error('이미지 로딩 실패'));
+            img.src = URL.createObjectURL(blob);
+        });
     }
 
     async loadMetadataFromFolder(folderPath) {
