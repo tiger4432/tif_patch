@@ -1,0 +1,12 @@
+﻿{
+  "name": "wafer-grid-tool-electron",
+  "version": "1.0.0",
+  "description": "Electron wrapper around index_v2.html for the Wafer Grid Tool.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.3.1"
+  }
+}
